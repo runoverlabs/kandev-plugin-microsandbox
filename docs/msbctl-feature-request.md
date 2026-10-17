@@ -2,7 +2,13 @@
 
 **For:** [msb-manager](https://github.com/runoverlabs/sandbox-manager) (`msbctl`)
 **From:** [kandev-plugin-microsandbox](../README.md), the Kandev remote executor plugin
-**Status:** requested. Nothing here exists in msbctl 0.3.0.
+**Status:** built and merged into msb-manager `main`
+([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61), merge
+`66f03f7`, 2026-10-17). **Not released yet:** the latest release is
+v0.3.0, which has none of this. This document now describes what was built;
+the differences from the original request are listed in
+[Changes from the request](#changes-from-the-request), and what is left in
+[Current state](#current-state).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Host side" and "Data path"
 
 ## Summary
@@ -21,9 +27,73 @@ flags emitted by `Sandbox`, registry entries rendered from `templates/`,
 tests against the fake `msb`.
 
 The plugin side is already built against the contract below. `health` and
-`list` are **fixed** (the plugin parses them today). The other verbs are
-**proposed**: the plugin adopts whatever shape msb-manager settles on, and
-this document is then updated to match.
+`list` are **fixed** (the plugin parses them today). The other verbs were
+proposed, and this document has been updated to the shape msb-manager
+settled on.
+
+## Current state
+
+As of 2026-10-17:
+
+| | State |
+| --- | --- |
+| F1–F15 | Built, on msb-manager `main`, in no release yet. Until one is cut, a host gets it from a checkout (`install.sh --dev`) or `main`. |
+| Tests | `tests/test_kandev.py` (28) and `host serve --kandev` rows in `tests/test_host_serve.py`, against the fake `msb` and a fake `tailscale`. CI green. |
+| Live run | The whole lifecycle against real msb 0.7.7, nested in an msb sandbox: provision, agentctl, inspect, lease, stop/start with re-sent secrets, expiry, reap, destroy. No secret, password or nonce reached argv or disk. |
+| Spikes | `spikes/16-kandev-host.sh`: S1, S3, S4 (pinned address) and the registry check PASS nested. **S2 (`tailscale serve`) and S5 (round trips) not run yet**: they need a tailnet node and a remote (`SPIKE_TS=1`, `SPIKE_SSH_DEST`). S4 should be re-run on a real host. |
+| Docs | "Kandev hosts" page and a `msbctl kandev` section on the Commands page. |
+
+For the plugin:
+
+- **Gate on `health.protocol == 1`, not on `msbctl_version`.** The version
+  string is `0.3.0` on a release install, but a checkout reports
+  `0.3.0+<sha> (git checkout)` — and every host with these verbs today is
+  a checkout or `main`, still numbered 0.3.0.
+- **The data path is the one open risk.** If S2 shows `tailscale serve`
+  does not strip the `/vm/<name>/p/<port>` prefix or does not pass
+  WebSocket upgrades, F10 switches to the fallback in the plan (a TLS
+  splice in msbctl), and leases gain a bearer token.
+- **Open question 1** (agentctl after a VM restart) is still Kandev's to
+  answer; see Open questions.
+
+## Changes from the request
+
+What the plugin has to adopt. Each one is also in place below.
+
+1. **`allow_extra = []` allows nothing extra**, as everywhere else in
+   msb-manager. `["*"]` trusts the Kandev server's profiles. A host outside
+   it is `invalid_config` (F1, F7).
+2. **The Kandev API is pinned by address, not by `allow_private_dns`.** The
+   host resolves `kandev_api.host`, emits one rule for that address and
+   port, and writes the name into the guest's `/etc/hosts`. DNS rebind
+   protection stays on. msb writes a fresh `/etc/hosts` at every boot, so
+   `start` writes the line again. `kandev_api` is required (F7).
+3. **Operator verbs on a kandev sandbox:** `ls`, `status`, `show`, and
+   `shell`/`exec` while it is running. Every other operator verb refuses, a
+   stopped sandbox is never started from the operator side, and new
+   operator names may not start with `k-` (F6).
+4. **Private registries work through msb's `password_env`:** one `msb pull`
+   with a throwaway `MSB_CONFIG_PATH` copy naming the variable and the
+   username, the password in that process's environment only, then
+   `msb create --pull never`. A private image must name its registry host.
+   `msb registry login` is not used, because it stores the credential (F7).
+5. **Names:** `k-<env>` only when that is already a valid sandbox name
+   (no lowercasing) and at most 40 characters, else the hash form, so two
+   ids that differ only in case cannot collide (Names).
+6. **Secrets:** every secret in `provision` must carry `hosts`; `start`
+   must get exactly the names the sandbox binds (hosts optional there).
+   Besides the reserved names requested, secret and env names may not be
+   `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `PWD`, `TERM`,
+   `LANG` or start with `MSB_`, `MSBCTL_`, `LD_`, `SSH_`, `XDG_`, `LC_`:
+   secret values go into msb's own environment (F7, F12).
+7. **agentctl `env`** may not set `AGENTCTL_BOOTSTRAP_NONCE`; the nonce
+   field is the only way in (F8).
+8. **`destroy`** answers `conflict`, and leaves it alone, if a VM under
+   that name lacks the Kandev label (F11).
+9. **Additions:** `[kandev] serve = "tailscale" | "none"` (F1);
+   `health.serve` also has `mode` and, when not ok, `reason` (F4); `reap`
+   also reports `errors` (F14).
+10. **Open questions 1, 2 and 4 are answered** (see Open questions).
 
 ## Milestones
 
@@ -103,8 +173,9 @@ a header over 64 KiB, or one that is not a single line, with
 msb sandbox names must match `SANDBOX_NAME` (`[a-z0-9][a-z0-9-]*`), and
 Kandev ids may not. **msbctl owns the mapping**:
 
-- `k-<env>` when that lowercased string matches `SANDBOX_NAME` and fits
-  msb's length limit;
+- `k-<env>` when that string, **not** lowercased, matches `SANDBOX_NAME`
+  and is at most 40 characters (msb uses the name as the guest hostname,
+  limited to 64 bytes, and in socket paths);
 - otherwise `k-` plus the first 24 hex digits of `sha256(env)`.
 
 Record the full id in the entry's `kandev_env`. Every record returns `name`,
@@ -166,8 +237,15 @@ allowed and the denied half, run on msb 0.7.7.
 | **S1** | A process started with `setsid … &` from `msb exec` keeps running after the exec returns **and** after the SSH session that ran msbctl ends. |
 | **S2** | `tailscale serve --bg --https=443 --set-path=/vm/<env>/p/<port> http://127.0.0.1:<h>`: is the prefix stripped before proxying? Do WebSocket upgrades pass? Is the response streamed unbuffered? How many mappings can one node hold? |
 | **S3** | `msb create --label k=v` sets labels, and `msb ls` can filter or report them. If not, reconcile falls back to the `k-` name prefix. |
-| **S4** | A guest reaches a Kandev `api_url` on the tailnet through an egress rule, while a non-allowlisted host is refused. The API host is a MagicDNS name resolving to `100.x`, so this likely needs `allow_private_dns`. |
+| **S4** | A guest reaches the Kandev API through one rule naming the address the host resolved, plus a guest `/etc/hosts` line, while a non-allowlisted host is refused, with DNS rebind protection on. |
 | **S5** | Cold and warm round trip of `ssh host msbctl kandev health` and `inspect`. The budgets are Kandev's 15 s for connection leases and 30 s for control calls. |
+
+All five are `spikes/16-kandev-host.sh` in msb-manager (with a registry
+credential check). Run 2026-10-17 on msb 0.7.7, nested inside an msb
+sandbox: S1, S3 and the registry check PASS; S4 PASS for the pinned
+address and the refused host, and showed that `/etc/hosts` is rewritten at
+every boot. S2 and S5 need a tailnet node and a remote, and are still to
+run on a real host (`SPIKE_TS=1`, `SPIKE_SSH_DEST`).
 
 If S2 fails, [F10](#f10-kandev-lease-and-the-data-path) switches to the
 fallback in the plan ("one stdlib TLS splice per port"), and the plugin then
@@ -192,8 +270,10 @@ base_url       = ""            # e.g. "https://sbx-01.tailnet.ts.net"
 # Egress every kandev sandbox gets ("base" is always first). The Kandev API
 # host is added per sandbox from the provision request.
 rule_groups    = ["github", "npm", "python", "claude"]
-# What a profile's extra egress may add. Empty means anything (the Kandev
-# server sets policy); a list restricts it to these hostname patterns.
+# What serves base_url: "tailscale" (`tailscale serve --set-path`) or "none".
+serve          = "tailscale"
+# What a profile's extra egress may add, as hostname patterns. Empty allows
+# nothing extra; ["*"] trusts whatever the Kandev server's profiles ask for.
 allow_extra    = []
 ```
 
@@ -266,8 +346,9 @@ removing one needs a protocol version bump.
 - `protocol` is `1`. The plugin refuses a host reporting another version.
 - `capacity` counts kandev sandboxes that are not `absent`, against
   `[kandev]`, with memory in MiB.
-- `serve.ok`: `tailscale serve` is running and this node can serve HTTPS
-  (or the fallback proxy is up).
+- `serve`: `{"ok": bool, "mode": "tailscale" | "none"}`, plus `reason` when
+  not ok. `ok` means `tailscale status` reports a running node with a DNS
+  name (always true with `serve = "none"`).
 - `platform` is the guest's `<goos>-<goarch>`; the plugin uses it to fetch
   the matching agentctl from Kandev.
 - `base_url` is `[kandev] base_url`; the plugin's host test warns when it
@@ -324,8 +405,10 @@ ssh_keys       = []
   filter, the Claude token and the `GH_TOKEN` binding.
 - msb labels `msbctl.owner=kandev` and `kandev.env=<env>` (S3) are the
   cross-check reconcile uses.
-- Operator verbs (`ls`, `show`, `shell`, `rm`) may display kandev entries,
-  but `edit`, `rebuild` and `rename` refuse them: Kandev owns them.
+- Operator verbs: `ls`, `status` and `show` display kandev entries, and
+  `shell`/`exec` work while one runs (never starting a stopped one). Every
+  other operator verb refuses them: Kandev owns them. New operator sandbox
+  names may not start with `k-`.
 
 **Accept:** a kandev entry round-trips through `tomllib`; no `ensure_*`
 plumbing runs for one (asserted through the fake `msb`'s argv).
@@ -360,10 +443,14 @@ msbctl kandev provision ENV        # stdin: one JSON header line
    effect. If the `operation_id` matches but the digest differs, or `ENV`
    belongs to another `operation_id`, answer `conflict`.
 2. **Validate.** The image passes `image_problem()` and is digest-pinned.
-   Secret names are not reserved (`is_reserved_var()`, plus `GITHUB_TOKEN`,
-   `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `AGENTCTL_*`) and do not
-   collide with `env`. `egress_allow` entries parse as `allow` targets and
-   pass `[kandev] allow_extra`. `expires_at` is in the future. Any failure is
+   Secret and env names are not reserved (`is_reserved_var()`, plus
+   `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `PATH`,
+   `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `PWD`, `TERM`, `LANG`, and
+   the prefixes `AGENTCTL_`, `MSB_`, `MSBCTL_`, `LD_`, `SSH_`, `XDG_`,
+   `LC_`), do not collide with each other, and every secret has `hosts`.
+   `egress_allow` entries are a host or `host:port` (not a rule) and match
+   `[kandev] allow_extra`. `kandev_api` is required. `expires_at` is in the
+   future. A private `image` names its registry host. Any failure is
    `invalid_config`.
 3. **Take the lock and check capacity.** If one more sandbox of this size
    would exceed `[kandev]`, answer `rate_limited` with `retry_after_seconds:
@@ -372,16 +459,26 @@ msbctl kandev provision ENV        # stdin: one JSON header line
    mid-create is reconcilable. `max_expires_at = expires_at`.
 5. **Create** through `do_create()` with flags from the same `Sandbox` code
    as every other sandbox:
-   - `--net-rule` for `base`, `[kandev] rule_groups`, `egress_allow` and the
-     `kandev_api` host (with private DNS allowed for it, per S4);
+   - `--net-rule` for `base`, `[kandev] rule_groups`, `egress_allow`, and
+     one rule for the address `kandev_api.host` resolves to **on the host**
+     (`allow@<addr>:tcp:<port>`). The name goes into the guest's
+     `/etc/hosts` after create, and again on every `start`, because msb
+     writes a fresh `/etc/hosts` at boot. DNS rebind protection stays on;
+     `allow_private_dns` is not used;
    - `--port` for the four ports;
    - `--secret NAME@HOSTS` per secret, with `with_transcript_passthrough()`
      as every binding gets;
    - the labels; `--max-duration` up to `max_expires_at`, as a backstop;
    - `env` as `-e`;
    - **no** `--vsock` agent filter.
-   Secret values and registry credentials go into the environment of that
-   one `msb` process only. Nothing is written to `secrets/`.
+   Secret values go into the environment of that one `msb create` only.
+   Nothing is written to `secrets/`.
+   - **Registry credentials** are used by a `msb pull` before the create:
+     msb is pointed with `MSB_CONFIG_PATH` at a throwaway copy of its
+     config that adds `registries.hosts.<host>.auth = {username,
+     password_env}`, the password is in that pull's environment, the copy
+     is deleted, and the create uses `--pull never`. (`msb registry login`
+     is not used: it stores the credential in the OS keyring.)
 6. Add the serve mappings ([F10](#f10-kandev-lease-and-the-data-path)), mark
    the entry `running`, set `generation = 1`, and print the record.
 
@@ -430,7 +527,8 @@ msbctl kandev agentctl ENV         # stdin: header line, then exactly `size` byt
 5. Wait for the published host port of `runtime_port` to accept, up to 30 s,
    and return the record with `agentctl.running = true`.
 
-- `env` keys must match `AGENTCTL_[A-Z0-9_]+`; others are `invalid_config`.
+- `env` keys must match `AGENTCTL_[A-Z0-9_]+` and may not be
+  `AGENTCTL_BOOTSTRAP_NONCE`; others are `invalid_config`.
 - `AGENTCTL_LISTEN_HOST=0.0.0.0` is required: msb publishes a port by
   connecting to the guest's own address, so a server bound to loopback is
   never reached (already documented for `msbctl port`).
@@ -499,7 +597,9 @@ msbctl kandev destroy ENV
 Removes the VM (`msb rm -f`), its disk, its serve mappings and its entry,
 and prints `{"destroyed": true}`. It is **always safe**: an unknown `ENV`, or
 an entry whose VM is already gone, also succeeds. A failure partway leaves
-the entry, so a retry or `reap` finishes the job.
+the entry, so a retry or `reap` finishes the job. A VM under that name that
+does not carry the Kandev label is not Kandev's: `destroy` answers
+`conflict` and leaves it alone.
 
 **Accept:** destroy twice → success twice; an operator sandbox is never
 touched even when names collide.
@@ -516,7 +616,11 @@ msbctl kandev stop ENV
   `msb start`'s environment. They exist nowhere on the host between starts,
   which is also why kandev entries are `autostart = false`. A request
   missing a value the entry binds is `invalid_config`; never start a
-  half-bound sandbox. A running VM is a no-op.
+  half-bound sandbox. The request must name **exactly** the secrets the
+  entry binds (`hosts` may be omitted here); extra names are
+  `invalid_config` too. A running VM is a no-op. `start` does not relaunch
+  agentctl: it reports `agentctl.running = false`, and the plugin calls
+  `agentctl` again if it needs to.
 - `start` bumps `generation`.
 
 **Accept:** after a host reboot, kandev VMs are stopped, and `start` with
@@ -542,7 +646,7 @@ msbctl host kandev install         # systemd user service + timer, every 60 s
 `reap` is one pass that exits; it is not a daemon. It prints a summary:
 
 ```json
-{"destroyed": ["k-…"], "marked_absent": ["k-…"], "orphans_removed": ["k-…"]}
+{"destroyed": ["k-…"], "marked_absent": ["k-…"], "orphans_removed": ["k-…"], "errors": []}
 ```
 
 - **Expiry**: destroy every entry past `expires_at`, including its serve
@@ -577,16 +681,16 @@ A "Kandev hosts" page on the docs site covering:
 ## Open questions
 
 1. **agentctl after a VM restart.** Does a restarted agentctl need a fresh
-   nonce, and does Kandev's attach provide one? Until this is answered,
-   `start` only starts the VM and reports `agentctl.running`, and the plugin
-   decides whether to call `agentctl` again.
-2. **Private images.** How does msb pull with registry credentials? The
-   request carries them, but the mechanism (`msb pull` with auth, a
-   per-call config) needs checking on 0.7.7.
-3. **`allow_extra` default.** Should it be empty (trust the Kandev server's
-   profiles) or a starter list?
-4. **Name length.** What is msb's maximum sandbox name length? It decides
-   when `k-<env>` falls back to the hash.
+   nonce, and does Kandev's attach provide one? Still open on Kandev's
+   side. As built, `start` only starts the VM and reports
+   `agentctl.running = false`, and the plugin decides whether to call
+   `agentctl` again.
+2. ~~Private images.~~ Answered: msb's config `password_env`, through a
+   throwaway `MSB_CONFIG_PATH` for one pull (F7). Verified on 0.7.7.
+3. ~~`allow_extra` default.~~ Answered: empty allows nothing extra;
+   `["*"]` trusts the profiles.
+4. ~~Name length.~~ Answered: 40 characters for `k-<env>` (msb's guest
+   hostname is limited to 64 bytes).
 5. **Idle VMs.** On session stop, keep the VM running until expiry, or stop
    it and restart on attach? Decide after measuring resume time; each idle VM
    costs about 300 MB.
