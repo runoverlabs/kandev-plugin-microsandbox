@@ -296,6 +296,7 @@ type testResult struct {
 	OK      bool           `json:"ok"`
 	Problem string         `json:"problem,omitempty"`
 	Hint    string         `json:"hint,omitempty"`
+	Warning string         `json:"warning,omitempty"`
 	Health  *msbctl.Health `json:"health,omitempty"`
 }
 
@@ -320,7 +321,13 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 	}
 	_, publicKey, _ := r.key(ctx)
 	health, err := client.Health(ctx, h)
-	return ok(diagnose(health, err, publicKey))
+	result := diagnose(health, err, publicKey)
+	// Leases are built on the host's own base URL; one that differs from
+	// the registered URL means the operator's picture of the host is stale.
+	if err == nil && health.BaseURL != "" && strings.TrimRight(health.BaseURL, "/") != h.BaseURL {
+		result.Warning = "The host reports base_url " + health.BaseURL + ", not the registered " + h.BaseURL + "."
+	}
+	return ok(result)
 }
 
 func diagnose(health msbctl.Health, err error, publicKey string) testResult {

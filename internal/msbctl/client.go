@@ -93,6 +93,8 @@ type Health struct {
 	MsbVersion    string         `json:"msb_version"`
 	KVM           bool           `json:"kvm"`
 	Enabled       bool           `json:"enabled"`
+	Platform      string         `json:"platform"`
+	BaseURL       string         `json:"base_url"`
 	Capacity      hosts.Capacity `json:"capacity"`
 	Serve         ServeStatus    `json:"serve"`
 }

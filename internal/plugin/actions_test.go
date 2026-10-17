@@ -125,8 +125,19 @@ func TestTestReportsHealthyHost(t *testing.T) {
 	status, body := call(t, r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	require.Equal(t, 200, status, body)
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, "0.4.1", body["health"].(map[string]any)["msb_version"])
+	assert.Equal(t, "0.7.7", body["health"].(map[string]any)["msb_version"])
 	assert.Equal(t, "msbctl kandev health", server.Execs()[0].Command)
+	assert.NotContains(t, body, "warning")
+}
+
+func TestTestWarnsWhenTheHostReportsAnotherBaseURL(t *testing.T) {
+	r := newRuntime(t, newFakeHost())
+	other := strings.Replace(healthyJSON, "https://sbx-01.tailnet.ts.net", "https://sbx-07.tailnet.ts.net", 1)
+	server := sshtest.Start(t, pluginKey(t, r), msbctlHost(map[string]sshtest.Reply{"health": {Stdout: other}}))
+	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey))))
+	_, body := call(t, r, ActionHostsTest, map[string]any{"name": "sbx-01"})
+	assert.Equal(t, true, body["ok"])
+	assert.Contains(t, body["warning"], "https://sbx-07.tailnet.ts.net")
 }
 
 func TestTestDiagnoses(t *testing.T) {

@@ -19,3 +19,5 @@ First development snapshot: the provider skeleton and the host registry
 - `msbctl kandev` host protocol version 1: `health` and `list`
   ([docs/host-protocol.md](docs/host-protocol.md)).
 - Placement: healthy candidates with room, most free memory first.
+- `health` also reports the host's `platform` and `base_url`; `hosts.test`
+  warns when that `base_url` differs from the registered one.

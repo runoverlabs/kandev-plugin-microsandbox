@@ -3,8 +3,8 @@
 The plugin controls each sandbox host by running `msbctl kandev <verb>` over
 SSH. This page is the contract between `internal/msbctl` and msbctl on the
 host ([msb-manager](https://github.com/runoverlabs/sandbox-manager)). The
-plugin implements it today; the host side is msb-manager's Phases 1 and 2 in
-the [implementation plan](plans/implementation-plan.md).
+plugin implements it today; what msbctl needs to build is in the
+[msbctl feature request](msbctl-feature-request.md).
 
 **Protocol version: 1.** `health` reports it, and the plugin refuses a host
 reporting any other version rather than guessing.
@@ -60,10 +60,12 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 ```json
 {
   "protocol": 1,
-  "msbctl_version": "0.9.0",
-  "msb_version": "0.4.1",
+  "msbctl_version": "0.4.0",
+  "msb_version": "0.7.7",
   "kvm": true,
   "enabled": true,
+  "platform": "linux-amd64",
+  "base_url": "https://sbx-01.tailnet.ts.net",
   "capacity": {
     "max_sandboxes": 12, "sandboxes": 3,
     "max_cpus": 32, "cpus": 8,
@@ -76,6 +78,8 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 - `enabled` is `[kandev] enabled` from the host's msbctl config.
 - `capacity` counts **kandev sandboxes only**, against the `[kandev]`
   limits. `max_memory` is reported in MiB.
+- `platform` is the guest's `<goos>-<goarch>`, as Kandev names platforms.
+- `base_url` is `[kandev] base_url`, the HTTPS base leases are built on.
 - `serve.ok` is whether `tailscale serve` (or the fallback proxy) is up.
 
 A host is a placement candidate only when `protocol` is 1 and `kvm`,
@@ -105,6 +109,6 @@ still lists sandboxes.
 ## Verbs still to define
 
 `provision`, `agentctl`, `inspect`, `find`, `start`, `stop`, `expiry`,
-`lease`, `destroy` and `reap` are specified in the implementation plan
-("Host side: `msbctl kandev`"). Their documents are added here, with their
-tests in `internal/msbctl`, when the plugin starts calling them.
+`lease`, `destroy` and `reap` are proposed in the
+[msbctl feature request](msbctl-feature-request.md). Each moves here, with
+its tests in `internal/msbctl`, when the plugin starts calling it.

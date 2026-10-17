@@ -20,7 +20,7 @@ with any workspace as the action scope).
 | `hosts.update` | a host | Replaces a host's SSH destination, pinned key, base URL and labels. The name cannot change, and the draining flag is kept. |
 | `hosts.drain` | `{"name": "...", "draining": true}` | A draining host gets no new sandboxes but keeps serving its existing ones. |
 | `hosts.remove` | `{"name": "...", "force": false}` | Asks the host for its kandev sandboxes and refuses (409) while it has any. If the host cannot be reached, it refuses (502) unless `force` is set. |
-| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, and the health report. |
+| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, and a `warning` when the host's own `base_url` differs from the registered one. |
 
 A host:
 

@@ -145,7 +145,8 @@ func msbctlHost(replies map[string]sshtest.Reply) sshtest.Handler {
 	}
 }
 
-const healthyJSON = `{"protocol":1,"msbctl_version":"0.9.0","msb_version":"0.4.1","kvm":true,"enabled":true,
+const healthyJSON = `{"protocol":1,"msbctl_version":"0.4.0","msb_version":"0.7.7","kvm":true,"enabled":true,
+ "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
  "capacity":{"max_sandboxes":12,"sandboxes":0,"max_cpus":32,"cpus":0,"max_memory_mib":98304,"memory_mib":0},
  "serve":{"ok":true}}`
 
