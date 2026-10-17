@@ -1,0 +1,78 @@
+name: Release
+
+# Actions are pinned by commit SHA with the tag in a trailing comment, and the
+# runner is pinned explicitly. See ci.yml for the rationale.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+# Keep in step with ci.yml.
+env:
+  KANDEV_REF: v0.97.0
+
+jobs:
+  release:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: kandev-plugin-microsandbox
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kdlbs/kandev
+          ref: ${{ env.KANDEV_REF }}
+          path: kandev
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # Keep in step with ci.yml: this builds the binary operators run.
+          go-version: "1.26.9"
+          cache-dependency-path: kandev-plugin-microsandbox/go.sum
+
+      # The tag must match manifest.yaml's version, or the marketplace entry
+      # resolves to an asset name nobody can predict.
+      - name: Check tag matches manifest version
+        working-directory: kandev-plugin-microsandbox
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(grep -E '^version:' manifest.yaml | head -1 | cut -d'"' -f2)"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag v$tag does not match manifest version $manifest"
+            exit 1
+          fi
+          echo "version=$manifest" >> "$GITHUB_ENV"
+
+      - name: Test
+        working-directory: kandev-plugin-microsandbox
+        run: make lint test-race
+
+      - name: Package all platforms
+        working-directory: kandev-plugin-microsandbox
+        run: make verify-package
+
+      # The release page shows this version's CHANGELOG section. An empty
+      # section fails the release rather than publishing a blank page.
+      - name: Extract release notes
+        working-directory: kandev-plugin-microsandbox
+        run: |
+          set -euo pipefail
+          awk -v v="$version" '$0 ~ "^## " v "$" {f=1; next} /^## /{f=0} f' CHANGELOG.md \
+            | sed '/./,$!d' > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          fi
+        env:
+          version: ${{ env.version }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: kandev-plugin-microsandbox/kandev-plugin-microsandbox-${{ env.version }}.tar.gz
+          body_path: ${{ runner.temp }}/notes.md
+          # A version with a hyphen (0.1.0-rc.1) is a pre-release.
+          prerelease: ${{ contains(env.version, '-') }}

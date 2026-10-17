@@ -1,0 +1,351 @@
+package plugin
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/kandev/kandev/pkg/pluginsdk"
+
+	"kandev-plugin-microsandbox/internal/hosts"
+	"kandev-plugin-microsandbox/internal/msbctl"
+	"kandev-plugin-microsandbox/internal/sshx"
+)
+
+// Action keys, matching manifest.yaml.
+const (
+	ActionHostsList   = "hosts.list"
+	ActionHostsScan   = "hosts.scan"
+	ActionHostsAdd    = "hosts.add"
+	ActionHostsUpdate = "hosts.update"
+	ActionHostsDrain  = "hosts.drain"
+	ActionHostsRemove = "hosts.remove"
+	ActionHostsTest   = "hosts.test"
+)
+
+// actionTimeout bounds one action, which may make one SSH round trip.
+const actionTimeout = 20 * time.Second
+
+// HandleAction serves the Sandbox Hosts page. Every action is admin-only in
+// the manifest: the registry decides where every workspace's sandboxes run.
+//
+// Kandev masks any Go error from an action as a 503, so every failure the
+// operator can act on is returned as a response with its own status.
+func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+	var handler func(context.Context, []byte) response
+	switch req.ActionKey {
+	case ActionHostsList:
+		handler = r.actionList
+	case ActionHostsScan:
+		handler = r.actionScan
+	case ActionHostsAdd:
+		handler = r.actionAdd
+	case ActionHostsUpdate:
+		handler = r.actionUpdate
+	case ActionHostsDrain:
+		handler = r.actionDrain
+	case ActionHostsRemove:
+		handler = r.actionRemove
+	case ActionHostsTest:
+		handler = r.actionTest
+	default:
+		return respond(fail(http.StatusNotFound, "unknown action")), nil
+	}
+	return respond(handler(ctx, req.Body)), nil
+}
+
+type response struct {
+	status int
+	body   any
+}
+
+func ok(body any) response { return response{http.StatusOK, body} }
+
+func fail(status int, message string) response {
+	return response{status, map[string]any{"error": message}}
+}
+
+func respond(res response) *pluginsdk.PluginActionResponse {
+	body, err := json.Marshal(res.body)
+	if err != nil {
+		res.status, body = http.StatusInternalServerError, []byte(`{"error":"response encoding failed"}`)
+	}
+	return &pluginsdk.PluginActionResponse{
+		Status: res.status, Body: body, Headers: map[string]string{"Content-Type": "application/json"},
+	}
+}
+
+// internalFailure logs the cause and returns a fixed message: Host errors
+// can carry details that do not belong in a browser response.
+func internalFailure(action string, err error) response {
+	if errors.Is(err, ErrNoHost) {
+		return fail(http.StatusServiceUnavailable, "the plugin is still starting; try again")
+	}
+	log.Printf("%s: %v", action, err)
+	return fail(http.StatusInternalServerError, "the host registry could not be read or saved")
+}
+
+func decode(body []byte, into any) error {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		body = []byte("{}")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(into)
+}
+
+// hostView is a host as the page shows it, with its key fingerprint.
+type hostView struct {
+	hosts.Host
+	Fingerprint string `json:"fingerprint"`
+}
+
+func viewOf(h hosts.Host) hostView {
+	if h.Labels == nil {
+		h.Labels = []string{}
+	}
+	fingerprint, _ := sshx.Fingerprint(h.HostKey)
+	return hostView{Host: h, Fingerprint: fingerprint}
+}
+
+func (r *Runtime) actionList(ctx context.Context, body []byte) response {
+	if err := decode(body, &struct{}{}); err != nil {
+		return fail(http.StatusUnprocessableEntity, "this action takes no fields")
+	}
+	_, publicKey, err := r.key(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsList, err)
+	}
+	registry, err := r.loadRegistry(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsList, err)
+	}
+	views := make([]hostView, 0, len(registry.Hosts))
+	for _, h := range registry.Hosts {
+		views = append(views, viewOf(h))
+	}
+	return ok(map[string]any{
+		"public_key": publicKey,
+		"authorize":  authorizeCommand(publicKey),
+		"hosts":      views,
+	})
+}
+
+// authorizeCommand is what the operator runs on each sandbox host.
+func authorizeCommand(publicKey string) string {
+	return "msbctl host authorize " + sshx.Quote(publicKey) + " --kandev"
+}
+
+// actionScan fetches the key a host presents, for the operator to confirm
+// before it is pinned by hosts.add. Nothing is stored.
+func (r *Runtime) actionScan(ctx context.Context, body []byte) response {
+	var in struct {
+		SSH string `json:"ssh"`
+	}
+	if err := decode(body, &in); err != nil {
+		return fail(http.StatusUnprocessableEntity, "expected {\"ssh\": \"user@host[:port]\"}")
+	}
+	dest := strings.TrimSpace(in.SSH)
+	if _, _, _, err := hosts.ParseSSH(dest); err != nil {
+		return fail(http.StatusUnprocessableEntity, "ssh: "+err.Error())
+	}
+	key, err := sshx.ScanHostKey(ctx, dest, r.dialer)
+	if err != nil {
+		log.Printf("%s %s: %v", ActionHostsScan, dest, err)
+		return fail(http.StatusBadGateway, "could not reach the host's SSH server")
+	}
+	fingerprint, _ := sshx.Fingerprint(key)
+	return ok(map[string]any{"host_key": key, "fingerprint": fingerprint})
+}
+
+func (r *Runtime) actionAdd(ctx context.Context, body []byte) response {
+	var in hosts.Host
+	if err := decode(body, &in); err != nil {
+		return fail(http.StatusUnprocessableEntity, "expected a host: name, ssh, host_key, base_url, labels")
+	}
+	return r.writeHost(ctx, ActionHostsAdd, in, func(reg hosts.Registry, h hosts.Host) (hosts.Registry, error) {
+		h.Draining = false
+		return reg.Add(h)
+	})
+}
+
+func (r *Runtime) actionUpdate(ctx context.Context, body []byte) response {
+	var in hosts.Host
+	if err := decode(body, &in); err != nil {
+		return fail(http.StatusUnprocessableEntity, "expected a host: name, ssh, host_key, base_url, labels")
+	}
+	return r.writeHost(ctx, ActionHostsUpdate, in, hosts.Registry.Update)
+}
+
+func (r *Runtime) writeHost(ctx context.Context, action string, in hosts.Host, change func(hosts.Registry, hosts.Host) (hosts.Registry, error)) response {
+	if _, err := sshx.ParseHostKey(in.HostKey); err != nil && strings.TrimSpace(in.HostKey) != "" {
+		return validationFailure(&hosts.ValidationError{Fields: []hosts.FieldError{{Field: "host_key", Message: err.Error()}}})
+	}
+	registry, err := r.mutateRegistry(ctx, func(reg hosts.Registry) (hosts.Registry, error) { return change(reg, in) })
+	if res, handled := registryFailure(err); handled {
+		return res
+	}
+	if err != nil {
+		return internalFailure(action, err)
+	}
+	saved, _ := registry.Find(strings.TrimSpace(in.Name))
+	status := http.StatusOK
+	if action == ActionHostsAdd {
+		status = http.StatusCreated
+	}
+	return response{status, map[string]any{"host": viewOf(saved)}}
+}
+
+func validationFailure(v *hosts.ValidationError) response {
+	return response{http.StatusUnprocessableEntity, map[string]any{"error": "the host is invalid", "fields": v.Fields}}
+}
+
+// registryFailure maps the registry's own errors to responses.
+func registryFailure(err error) (response, bool) {
+	var invalid *hosts.ValidationError
+	switch {
+	case err == nil:
+		return response{}, false
+	case errors.As(err, &invalid):
+		return validationFailure(invalid), true
+	case errors.Is(err, hosts.ErrNotFound):
+		return fail(http.StatusNotFound, err.Error()), true
+	case errors.Is(err, hosts.ErrExists):
+		return fail(http.StatusConflict, err.Error()), true
+	case errors.Is(err, hosts.ErrTooMany):
+		return fail(http.StatusConflict, err.Error()), true
+	default:
+		return response{}, false
+	}
+}
+
+func (r *Runtime) actionDrain(ctx context.Context, body []byte) response {
+	var in struct {
+		Name     string `json:"name"`
+		Draining *bool  `json:"draining"`
+	}
+	if err := decode(body, &in); err != nil || in.Draining == nil {
+		return fail(http.StatusUnprocessableEntity, "expected {\"name\": \"...\", \"draining\": true|false}")
+	}
+	registry, err := r.mutateRegistry(ctx, func(reg hosts.Registry) (hosts.Registry, error) {
+		return reg.SetDraining(in.Name, *in.Draining)
+	})
+	if res, handled := registryFailure(err); handled {
+		return res
+	}
+	if err != nil {
+		return internalFailure(ActionHostsDrain, err)
+	}
+	saved, _ := registry.Find(in.Name)
+	return ok(map[string]any{"host": viewOf(saved)})
+}
+
+// actionRemove refuses to forget a host that still owns kandev sandboxes:
+// every later call for them routes by the host name in their resource
+// state, so removing it would strand them. Only the host knows its
+// inventory, so it is asked; `force` removes an unreachable host anyway.
+func (r *Runtime) actionRemove(ctx context.Context, body []byte) response {
+	var in struct {
+		Name  string `json:"name"`
+		Force bool   `json:"force"`
+	}
+	if err := decode(body, &in); err != nil || in.Name == "" {
+		return fail(http.StatusUnprocessableEntity, "expected {\"name\": \"...\", \"force\": false}")
+	}
+	registry, err := r.loadRegistry(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsRemove, err)
+	}
+	h, found := registry.Find(in.Name)
+	if !found {
+		return fail(http.StatusNotFound, hosts.ErrNotFound.Error())
+	}
+	client, err := r.client(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsRemove, err)
+	}
+	sandboxes, err := client.List(ctx, h)
+	switch {
+	case err == nil && len(sandboxes) > 0:
+		return response{http.StatusConflict, map[string]any{
+			"error": "the host still has kandev sandboxes; drain it and wait for them to be destroyed", "sandboxes": len(sandboxes),
+		}}
+	case err != nil && !in.Force:
+		log.Printf("%s %s: %v", ActionHostsRemove, h.Name, err)
+		return fail(http.StatusBadGateway, "could not confirm the host has no sandboxes; retry, or remove with force")
+	}
+	_, err = r.mutateRegistry(ctx, func(reg hosts.Registry) (hosts.Registry, error) { return reg.Remove(in.Name) })
+	if res, handled := registryFailure(err); handled {
+		return res
+	}
+	if err != nil {
+		return internalFailure(ActionHostsRemove, err)
+	}
+	return ok(map[string]any{"removed": in.Name})
+}
+
+// testResult is the diagnostic hosts.test returns. It is always a 200 with
+// a problem code, because a failing host is the answer, not an error.
+type testResult struct {
+	OK      bool           `json:"ok"`
+	Problem string         `json:"problem,omitempty"`
+	Hint    string         `json:"hint,omitempty"`
+	Health  *msbctl.Health `json:"health,omitempty"`
+}
+
+func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := decode(body, &in); err != nil || in.Name == "" {
+		return fail(http.StatusUnprocessableEntity, "expected {\"name\": \"...\"}")
+	}
+	registry, err := r.loadRegistry(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsTest, err)
+	}
+	h, found := registry.Find(in.Name)
+	if !found {
+		return fail(http.StatusNotFound, hosts.ErrNotFound.Error())
+	}
+	client, err := r.client(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsTest, err)
+	}
+	_, publicKey, _ := r.key(ctx)
+	health, err := client.Health(ctx, h)
+	return ok(diagnose(health, err, publicKey))
+}
+
+func diagnose(health msbctl.Health, err error, publicKey string) testResult {
+	switch {
+	case errors.Is(err, sshx.ErrHostKeyMismatch):
+		return testResult{Problem: "host_key_mismatch", Hint: "The host presented a different SSH host key than the pinned one. Verify it on the host before updating the pin."}
+	case errors.Is(err, sshx.ErrNotAuthorized):
+		return testResult{Problem: "not_authorized", Hint: "Authorize the plugin's key on the host: " + authorizeCommand(publicKey)}
+	case errors.Is(err, msbctl.ErrUnreachable):
+		return testResult{Problem: "unreachable", Hint: "The host's SSH server did not answer."}
+	case msbctl.CodeOf(err) == msbctl.CodeDenied:
+		return testResult{Problem: "refused", Hint: "The host refused `msbctl kandev`: authorize the key with --kandev, and check msbctl on the host is recent enough."}
+	case msbctl.CodeOf(err) == msbctl.CodeUnsupported:
+		return testResult{Problem: "protocol", Hint: "The host's msbctl speaks a different kandev protocol version than this plugin.", Health: &health}
+	case err != nil:
+		return testResult{Problem: "unavailable", Hint: "msbctl on the host did not return a health report."}
+	}
+	result := testResult{OK: health.Usable(), Health: &health}
+	switch {
+	case !health.Enabled:
+		result.Problem, result.Hint = "disabled", "Set enabled = true under [kandev] in the host's msbctl config."
+	case !health.KVM:
+		result.Problem, result.Hint = "no_kvm", "/dev/kvm is not available on the host."
+	case !health.Serve.OK:
+		result.Problem, result.Hint = "no_data_path", "tailscale serve is not running on the host, so Kandev cannot reach sandboxes."
+	}
+	return result
+}

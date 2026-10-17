@@ -1,0 +1,187 @@
+# Kandev plugin manifest: the declarative contract between this plugin and a
+# Kandev host. `id` matches the Go module name and the release asset name;
+# keep them in sync when renaming. `make validate-manifest` checks this file
+# with the pinned Kandev's own validator.
+id: "kandev-plugin-microsandbox"
+api_version: 2
+version: "0.1.0-dev.1"
+display_name: "microsandbox"
+description: "Run each Kandev session in its own microsandbox microVM on registered sandbox hosts."
+author: "naerymdan"
+categories: ["tools"]
+
+# Remote executor plugins are on by default from v0.97.0, and this is the
+# release the provider contract here was read from.
+min_kandev_version: "0.97.0"
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+# state: the sandbox host registry. secrets: the plugin's SSH private key.
+# Changing this set invalidates the operator's approval for every capability;
+# internal/plugin/manifest_test.go pins it.
+capabilities:
+  executor_provider: true
+  state: true
+  secrets: true
+
+# The Sandbox Hosts actions. Every one is admin-only: the registry decides
+# where every workspace's sandboxes run, and hosts.scan dials out. `scope` is
+# required by the action contract; the registry itself is plugin-wide.
+actions:
+  - key: "hosts.list"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "hosts.scan"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "hosts.add"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 16384
+  - key: "hosts.update"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 16384
+  - key: "hosts.drain"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "hosts.remove"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "hosts.test"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+
+executor_providers:
+  - key: "microsandbox"
+    display_name: "microsandbox microVM"
+    description: "An isolated microVM per session, on a registered sandbox host."
+    contract_version: 1
+    supported_state_versions: [1]
+    # Kandev delivers every value as a string. Defaults and cross-field rules
+    # (paired fields, reserved names) are enforced in internal/profile, since
+    # this schema subset has no `default` keyword.
+    profile_schema:
+      type: object
+      required: [placement, image, cpus, memory_mib, max_lifetime_hours]
+      properties:
+        placement:
+          type: string
+          title: "Placement"
+          description: "label:<label> to use any host carrying that label, or host:<name> for one host."
+        image:
+          type: string
+          title: "OCI image"
+          description: "Pinned by digest, e.g. ghcr.io/acme/api-sbx@sha256:... A tag alone is refused."
+        cpus:
+          type: integer
+          title: "CPUs"
+          minimum: 1
+          maximum: 16
+        memory_mib:
+          type: integer
+          title: "Memory (MiB)"
+          minimum: 512
+          maximum: 65536
+        disk_gib:
+          type: integer
+          title: "Root disk (GiB)"
+          description: "Default 20."
+          minimum: 5
+          maximum: 500
+        max_lifetime_hours:
+          type: integer
+          title: "Maximum lifetime (hours)"
+          description: "Hard cap: the sandbox is destroyed at this age even if Kandev never asks."
+          minimum: 1
+          maximum: 168
+        retain_hours:
+          type: integer
+          title: "Retain after stop (hours)"
+          description: "How long a stopped sandbox is kept for review. Default 24."
+          minimum: 0
+          maximum: 168
+        egress_allow:
+          type: string
+          title: "Extra egress"
+          description: "Comma-separated host or host:port entries added to the host's base rules. Rules are hostname-based and inspected on :443; on other ports a hostname degrades to its resolved IPs, and plain HTTP (:80) is always denied."
+        env:
+          type: string
+          title: "Environment"
+          description: "KEY=VALUE;KEY2=VALUE2. Non-secret values only: use an extra secret for credentials."
+        registry_username:
+          type: string
+          title: "Registry username"
+          description: "For a private image."
+        registry_password:
+          type: string
+          title: "Registry password"
+          secret: true
+        extra_secret_1_name:
+          type: string
+          title: "Secret 1: variable"
+          description: "The guest sees a placeholder; the sandbox host substitutes the value into request headers bound for the listed hosts only."
+        extra_secret_1_value:
+          type: string
+          title: "Secret 1: value"
+          secret: true
+        extra_secret_1_hosts:
+          type: string
+          title: "Secret 1: hosts"
+          description: "Comma-separated hostnames the value may be sent to."
+        extra_secret_2_name:
+          type: string
+          title: "Secret 2: variable"
+        extra_secret_2_value:
+          type: string
+          title: "Secret 2: value"
+          secret: true
+        extra_secret_2_hosts:
+          type: string
+          title: "Secret 2: hosts"
+        extra_secret_3_name:
+          type: string
+          title: "Secret 3: variable"
+        extra_secret_3_value:
+          type: string
+          title: "Secret 3: value"
+          secret: true
+        extra_secret_3_hosts:
+          type: string
+          title: "Secret 3: hosts"
+    # Only what routes later calls: the host that owns the sandbox and its
+    # name there. Never a secret, a nonce or a lease.
+    resource_state_schema:
+      type: object
+      additionalProperties: false
+      required: [host, sandbox_name]
+      properties:
+        host:
+          type: string
+        sandbox_name:
+          type: string
+        image:
+          type: string
+        created_at:
+          type: string
+    capabilities:
+      terminal: true
+      files: true
+      git: true
+      embedded_editor: true
+      preview: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 604800

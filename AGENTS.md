@@ -1,0 +1,113 @@
+# kandev-plugin-microsandbox — agent guide
+
+> Conventions and gotchas for AI coding agents working in this repo. Human
+> documentation is in [`README.md`](README.md) and [`docs/`](docs/).
+
+## What this is
+
+A Kandev runtime plugin providing a **remote executor**: one microsandbox
+microVM per Kandev session, on sandbox hosts that run msb-manager. The plugin
+is a Go binary Kandev spawns as a gRPC subprocess. It reaches each host with
+`ssh <host> msbctl kandev <verb>` through a forced command. There is no UI
+bundle yet.
+
+The design is [docs/plans/implementation-plan.md](docs/plans/implementation-plan.md).
+Its host side (msbctl's `kandev` verbs) lives in msb-manager, not here.
+[docs/host-protocol.md](docs/host-protocol.md) is the contract between the two
+and is updated in the same change as `internal/msbctl`.
+
+## Setup: the sibling checkout
+
+This repo **only builds next to a Kandev checkout** at `../kandev`
+(`replace github.com/kandev/kandev => ../kandev/apps/backend`). That checkout
+is read-only reference material pinned at the CI tag: never edit, commit or
+push in it. It is also the authority on host behaviour. Read
+`../kandev/apps/backend/` rather than inferring from SDK signatures.
+
+## Commands
+
+```sh
+make lint        # gofmt, go vet, manifest check with Kandev's own validator
+make test        # Go tests (make test-race is what CI runs)
+make verify-package-host
+```
+
+Run `make lint && make test-race` before claiming a change is done.
+
+## Architecture rule
+
+| Package | Owns |
+| --- | --- |
+| `internal/profile/` | Executor profile parsing and validation: pure |
+| `internal/hosts/` | Host registry and placement: ports (`Store`, `Prober`), no SSH, no SDK |
+| `internal/msbctl/` | Every detail of the `msbctl kandev` protocol |
+| `internal/sshx/` | SSH: key, host key pinning, pool, quoting |
+| `internal/plugin/` | SDK wiring, actions, provider RPCs |
+
+**Nothing outside `internal/msbctl` parses msbctl output or names a verb.
+Nothing in `internal/msbctl` or `internal/sshx` decides placement or policy.**
+
+## The secrets to protect
+
+Profile secret values, registry credentials, the bootstrap nonce and the
+plugin's SSH private key. They must never reach argv (visible in `ps` and
+sshd logs), a log line, resource state, a progress message, an error message
+or a browser response. Secret inputs to a host go on **stdin**. `profile.Spec`
+holds secret values, so it is never logged or persisted.
+
+**Host output is never forwarded.** msbctl's stderr is discarded, and an
+error envelope's `message` is dropped; only its `code` maps through. Kandev
+receives fixed `message_id`s (`profile.<field>.<code>`,
+`provider.microsandbox.<id>`).
+
+## The manifest is a contract
+
+- Changing the capability set invalidates the operator's approval for every
+  capability. `internal/plugin/manifest_test.go` pins the set, the action
+  list and the profile fields; it fails on purpose when the manifest changes.
+  Update it deliberately.
+- The profile schema accepts only `type`, `title`, `description`, `enum`,
+  `secret`, `format`, `minimum` and `maximum` per property. There is **no
+  `default`**: defaults live in `internal/profile` and in descriptions.
+- `make validate-manifest` runs the pinned Kandev's real validator. Trust it
+  over memory.
+
+## Host behaviour worth knowing
+
+Verified in `../kandev` at v0.97.0.
+
+- **Kandev probes the provider at activation** by calling
+  `ValidateExecutorProfile` with an empty config, possibly before `SetHost`.
+  It needs a non-nil response and no Go error: return field errors.
+- The six other provider RPCs must exist for the provider to be offered at
+  all (`ExecutorProviderPlugin` is all-or-nothing).
+- Profile config arrives as `map[string]string`; numbers are canonical
+  strings. Secret fields come separately in `SecretValues`.
+- Field error `code` and `message_id` are free-form to the host; the
+  `localized_messages` manifest map is for the host's own translation keys.
+- Provider error codes: `invalid_config`, `denied`, `unsupported`,
+  `not_found`, `expired`, `conflict`, `unavailable`, `rate_limited`,
+  `cleanup_pending` (`docs/specs/executors/system-design/remote-executor-plugins.md`).
+  The in-tree fixture uses other strings; do not copy them.
+- Plugin-wide Host state is scope **`instance`** with an empty scope id.
+  (The plan says "scope plugin"; there is no such scope.)
+- **The host masks every Go error from an action as a 503.** Return an
+  operator-actionable failure as a response with its own status.
+- `access: admin` actions need `min_kandev_version` ≥ 0.91.1; actions need a
+  `scope` even when, like the host registry, the data is plugin-wide.
+- Host state round-trips through JSON: numbers come back as `float64`.
+  Decode by re-encoding, as `stateStore` does.
+
+## Conventions
+
+- Comments say why, not what. State the invariant; no review-round narration.
+- Every behaviour change needs a test. Before trusting a new test, **break
+  the code it covers and confirm it fails.**
+- Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `chore`, `ci`,
+  `build`, `test`.
+- Anything user-visible goes in `CHANGELOG.md` under `## Unreleased`.
+
+## Maintaining this file
+
+If a change makes a section here wrong, update it in the same change. Keep it
+concise and factual.

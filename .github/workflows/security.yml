@@ -1,0 +1,122 @@
+name: Security
+
+# Same pinning rule as ci.yml. A separate workflow because of its trigger: a
+# dependency becomes vulnerable when an advisory is published, not when someone
+# pushes, so it also runs weekly.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, 07:00 UTC.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Keep in step with ci.yml.
+env:
+  KANDEV_REF: v0.97.0
+
+jobs:
+  # The plugin holds an SSH private key and handles profile secrets, so a key
+  # or token reaching a commit is the most plausible leak in this repo.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: a secret committed and later removed is still
+          # leaked, and a shallow clone cannot see it.
+          fetch-depth: 0
+
+      # Fetched and checksummed rather than run through gitleaks-action, which
+      # needs a paid licence key for organization accounts.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.0"
+          GITLEAKS_SHA256: "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e"
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sfL "$url" -o gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan history
+        run: gitleaks git . --no-banner --redact --verbose
+
+      - name: Scan working tree
+        run: gitleaks dir . --no-banner --redact --verbose
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: kandev-plugin-microsandbox
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kdlbs/kandev
+          ref: ${{ env.KANDEV_REF }}
+          path: kandev
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.9"
+          cache-dependency-path: kandev-plugin-microsandbox/go.sum
+
+      # govulncheck reports only vulnerabilities on a reachable call path.
+      - name: govulncheck
+        working-directory: kandev-plugin-microsandbox
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: kandev-plugin-microsandbox
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kdlbs/kandev
+          ref: ${{ env.KANDEV_REF }}
+          path: kandev
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version: "1.26.9"
+          cache-dependency-path: kandev-plugin-microsandbox/go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+          source-root: kandev-plugin-microsandbox
+
+      # Build only this module, so the database covers this plugin's code and
+      # not the sibling kandev checkout.
+      - name: Build
+        if: matrix.language == 'go'
+        working-directory: kandev-plugin-microsandbox
+        run: go build ./...
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
+        with:
+          category: /language:${{ matrix.language }}
+          checkout_path: kandev-plugin-microsandbox

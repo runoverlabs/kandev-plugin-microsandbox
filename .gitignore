@@ -1,0 +1,6 @@
+bin/
+.build/
+*.tar.gz
+
+# Local-only agent pointer. AGENTS.md is the committed source of truth.
+CLAUDE.md
