@@ -31,7 +31,7 @@ func (f *fakeRunner) Run(_ context.Context, _ hosts.Host, args []string, _ io.Re
 const healthy = `{"protocol":1,"msbctl_version":"0.4.0","msb_version":"0.7.7","kvm":true,"enabled":true,
  "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
  "capacity":{"max_sandboxes":12,"sandboxes":3,"max_cpus":32,"cpus":8,"max_memory_mib":98304,"memory_mib":16384},
- "serve":{"ok":true}}`
+ "serve":{"ok":true,"mode":"tailscale"}}`
 
 func TestHealthDecodesAndSendsVerb(t *testing.T) {
 	runner := &fakeRunner{reply: reply{stdout: healthy}}
@@ -42,6 +42,7 @@ func TestHealthDecodesAndSendsVerb(t *testing.T) {
 	assert.Equal(t, "linux-amd64", health.Platform)
 	assert.Equal(t, "https://sbx-01.tailnet.ts.net", health.BaseURL)
 	assert.Equal(t, 98304-16384, health.Capacity.FreeMemoryMiB())
+	assert.Equal(t, "tailscale", health.Serve.Mode)
 	assert.True(t, health.Usable())
 }
 

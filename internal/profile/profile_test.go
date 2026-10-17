@@ -136,6 +136,7 @@ func TestParseEgressAllow(t *testing.T) {
 		"localhost",
 		"pypi.org/simple",
 		"-bad.example.com",
+		"example.c",
 	} {
 		_, errs := Parse(with(validConfig(), FieldEgressAllow, bad), nil)
 		assert.Equal(t, []FieldError{{FieldEgressAllow, CodeInvalid}}, errs, bad)
@@ -150,13 +151,20 @@ func TestParseEnv(t *testing.T) {
 	}, spec.Env)
 
 	for raw, code := range map[string]string{
-		"NOEQUALS":                  CodeInvalid,
-		"1BAD=x":                    CodeInvalid,
-		"GH_TOKEN=x":                CodeReserved,
-		"gh_token=x":                CodeReserved,
-		"AGENTCTL_LISTEN_HOST=::":   CodeReserved,
-		"CLAUDE_CODE_OAUTH_TOKEN=x": CodeReserved,
-		"A=1;a=2":                   CodeDuplicate,
+		"NOEQUALS":                           CodeInvalid,
+		"1BAD=x":                             CodeInvalid,
+		"GH_TOKEN=x":                         CodeReserved,
+		"gh_token=x":                         CodeInvalid, // lowercase is not a variable name to msbctl
+		"node_env=x":                         CodeInvalid,
+		"PATH=/opt/bin":                      CodeReserved,
+		"LD_PRELOAD=/x.so":                   CodeReserved,
+		"MSB_SECRET=x":                       CodeReserved,
+		"SSH_AUTH_SOCK=x":                    CodeReserved,
+		"CLAUDE_CODE_OAUTH_TOKEN_WORK=x":     CodeReserved,
+		"AGENTCTL_LISTEN_HOST=::":            CodeReserved,
+		"CLAUDE_CODE_OAUTH_TOKEN=x":          CodeReserved,
+		"A=1;A=2":                            CodeDuplicate,
+		"A" + strings.Repeat("B", 64) + "=x": CodeInvalid,
 	} {
 		_, errs := Parse(with(validConfig(), FieldEnv, raw), nil)
 		assert.Equal(t, []FieldError{{FieldEnv, code}}, errs, raw)
@@ -173,6 +181,27 @@ func TestParseRegistryCredentialsArePaired(t *testing.T) {
 	spec, errs := Parse(with(validConfig(), FieldRegistryUsername, "bot"), map[string]string{FieldRegistryPassword: "pw"})
 	require.Empty(t, errs)
 	assert.Equal(t, "pw", spec.RegistryPassword)
+}
+
+func TestParsePrivateImageMustNameItsRegistry(t *testing.T) {
+	creds := map[string]string{FieldRegistryPassword: "pw"}
+	for image, ok := range map[string]bool{
+		"ghcr.io/acme/api@" + digest:        true,
+		"registry.local:5000/api@" + digest: true,
+		"localhost/api@" + digest:           true,
+		"acme/api@" + digest:                false,
+		"ubuntu@" + digest:                  false,
+	} {
+		_, errs := Parse(with(validConfig(), FieldImage, image, FieldRegistryUsername, "bot"), creds)
+		if ok {
+			assert.Empty(t, errs, image)
+		} else {
+			assert.Equal(t, []FieldError{{FieldImage, CodeNoRegistry}}, errs, image)
+		}
+	}
+	// A public image needs no registry host.
+	_, errs := Parse(with(validConfig(), FieldImage, "acme/api@"+digest), nil)
+	assert.Empty(t, errs)
 }
 
 func TestParseExtraSecrets(t *testing.T) {
@@ -219,7 +248,7 @@ func TestParseExtraSecretProblems(t *testing.T) {
 func TestParseRejectsDuplicateSecretNamesAcrossSlots(t *testing.T) {
 	config := with(validConfig(),
 		SecretField(1, "name"), "TOKEN", SecretField(1, "hosts"), "a.example.com",
-		SecretField(2, "name"), "token", SecretField(2, "hosts"), "b.example.com",
+		SecretField(2, "name"), "TOKEN", SecretField(2, "hosts"), "b.example.com",
 	)
 	secrets := map[string]string{SecretField(1, "value"): "x", SecretField(2, "value"): "y"}
 	spec, errs := Parse(config, secrets)

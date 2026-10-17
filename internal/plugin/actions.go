@@ -352,7 +352,7 @@ func diagnose(health msbctl.Health, err error, publicKey string) testResult {
 	case !health.KVM:
 		result.Problem, result.Hint = "no_kvm", "/dev/kvm is not available on the host."
 	case !health.Serve.OK:
-		result.Problem, result.Hint = "no_data_path", "tailscale serve is not running on the host, so Kandev cannot reach sandboxes."
+		result.Problem, result.Hint = "no_data_path", "Tailscale is not running with a DNS name on the host, so tailscale serve cannot publish sandboxes to Kandev."
 	}
 	return result
 }

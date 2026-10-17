@@ -84,16 +84,25 @@ saved.
 | `disk_gib` | no | 5–500, default 20 |
 | `max_lifetime_hours` | yes | 1–168. The sandbox is destroyed at this age |
 | `retain_hours` | no | 0–168, default 24 |
-| `egress_allow` | no | Comma-separated `host` or `host:port`; `*.` wildcards allowed. No IPs, URLs or single-label names |
-| `env` | no | `KEY=VALUE;KEY2=VALUE2`, non-secret values only |
-| `registry_username` / `registry_password` | no | Both or neither |
+| `egress_allow` | no | Comma-separated `host` or `host:port`; `*.` wildcards allowed. No IPs, URLs or single-label names, and the last label is at least two characters. The host must also permit each entry in `[kandev] allow_extra` (below) |
+| `env` | no | `KEY=VALUE;KEY2=VALUE2`, non-secret values only. Names are uppercase `A-Z`, `0-9`, `_`, at most 64 characters |
+| `registry_username` / `registry_password` | no | Both or neither. A private image must name its registry host (`ghcr.io/…`, `registry.example.com:5000/…`) |
 | `extra_secret_N_name` / `_value` / `_hosts` | no | N = 1–3. A name, a value and at least one host, all together |
 
-Names refused for `env` and secrets: `GH_TOKEN`, `GITHUB_TOKEN`,
-`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and
-anything starting with `AGENTCTL_`. Kandev delivers agent and git credentials
-itself, and the plugin configures agentctl. A name also cannot appear twice
-across `env` and the secrets.
+Names refused for `env` and secrets, the same list msbctl refuses:
+`GH_TOKEN`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, the
+Claude token variables, `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`,
+`PWD`, `TERM`, `LANG`, and anything starting with `AGENTCTL_`, `MSB_`,
+`MSBCTL_`, `LD_`, `SSH_`, `XDG_` or `LC_`. Kandev delivers agent and git
+credentials itself, the plugin configures agentctl, and secret values pass
+through the environment of the host's `msb` process. A name also cannot
+appear twice across `env` and the secrets.
+
+**Extra egress is the host's call too.** `[kandev] allow_extra` on each host
+lists the hostname patterns a profile may add; its default, `[]`, allows
+nothing extra, and `["*"]` trusts every profile. The plugin cannot see that
+setting when the profile is saved, so an entry the host does not allow fails
+at launch with `invalid_config`.
 
 Egress is hostname-based and inspected on :443. On any other port a hostname
 rule degrades to the IPs it resolves to, and plain HTTP (:80) is always

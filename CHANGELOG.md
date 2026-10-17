@@ -21,3 +21,8 @@ First development snapshot: the provider skeleton and the host registry
 - Placement: healthy candidates with room, most free memory first.
 - `health` also reports the host's `platform` and `base_url`; `hosts.test`
   warns when that `base_url` differs from the registered one.
+- Profile validation follows what msbctl accepts, so a profile it would
+  refuse at launch is refused on save: uppercase variable names only, the
+  wider reserved-name list (`PATH`, `HOME`, `LD_*`, `MSB_*`, `SSH_*`, …), a
+  two-character minimum last label in egress hostnames, and a registry host
+  in a private image's reference.

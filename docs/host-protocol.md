@@ -7,7 +7,13 @@ plugin implements it today; what msbctl needs to build is in the
 [msbctl feature request](msbctl-feature-request.md).
 
 **Protocol version: 1.** `health` reports it, and the plugin refuses a host
-reporting any other version rather than guessing.
+reporting any other version rather than guessing. It never gates on
+`msbctl_version`: a checkout reports `0.3.0+<sha> (git checkout)`, and the
+first hosts with these verbs run msb-manager `main` ahead of a release.
+
+The host side is built on msb-manager `main`
+([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61)), not yet
+in a release.
 
 ## Transport
 
@@ -60,7 +66,7 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 ```json
 {
   "protocol": 1,
-  "msbctl_version": "0.4.0",
+  "msbctl_version": "0.3.0+66f03f7 (git checkout)",
   "msb_version": "0.7.7",
   "kvm": true,
   "enabled": true,
@@ -71,7 +77,7 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
     "max_cpus": 32, "cpus": 8,
     "max_memory_mib": 98304, "memory_mib": 16384
   },
-  "serve": {"ok": true}
+  "serve": {"ok": true, "mode": "tailscale"}
 }
 ```
 
@@ -80,7 +86,10 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
   limits. `max_memory` is reported in MiB.
 - `platform` is the guest's `<goos>-<goarch>`, as Kandev names platforms.
 - `base_url` is `[kandev] base_url`, the HTTPS base leases are built on.
-- `serve.ok` is whether `tailscale serve` (or the fallback proxy) is up.
+- `serve.mode` is `[kandev] serve`: `tailscale` or `none`. `serve.ok` means
+  `tailscale status` shows a running node with a DNS name (always true with
+  `none`). A `reason` sent when it is not ok is msbctl's text and is not
+  read.
 
 A host is a placement candidate only when `protocol` is 1 and `kvm`,
 `enabled` and `serve.ok` are all true. Among those, placement drops hosts
@@ -109,6 +118,7 @@ still lists sandboxes.
 ## Verbs still to define
 
 `provision`, `agentctl`, `inspect`, `find`, `start`, `stop`, `expiry`,
-`lease`, `destroy` and `reap` are proposed in the
-[msbctl feature request](msbctl-feature-request.md). Each moves here, with
-its tests in `internal/msbctl`, when the plugin starts calling it.
+`lease`, `destroy` and `reap` are built on the host as
+described in the [msbctl feature request](msbctl-feature-request.md). Each
+moves here, with its tests in `internal/msbctl`, when the plugin starts
+calling it.

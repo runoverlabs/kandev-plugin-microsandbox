@@ -99,9 +99,12 @@ type Health struct {
 	Serve         ServeStatus    `json:"serve"`
 }
 
-// ServeStatus reports whether the host's HTTPS data path is up.
+// ServeStatus reports whether the host's HTTPS data path is up. The host
+// also sends a `reason` when it is not; that is msbctl's text and is not
+// read, like every other message the host writes.
 type ServeStatus struct {
-	OK bool `json:"ok"`
+	OK   bool   `json:"ok"`
+	Mode string `json:"mode"` // "tailscale" or "none"
 }
 
 // Usable reports whether a host can take new sandboxes at all, regardless

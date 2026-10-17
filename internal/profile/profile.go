@@ -54,6 +54,9 @@ const (
 	CodeReserved   = "reserved"
 	CodeDuplicate  = "duplicate"
 	CodeUnpaired   = "unpaired"
+	// CodeNoRegistry: a private image must name its registry host, which is
+	// where the host scopes the pull credentials.
+	CodeNoRegistry = "no_registry"
 )
 
 // FieldError is one rejected field. Message text is never carried: Kandev
@@ -130,29 +133,41 @@ var imagePattern = regexp.MustCompile(
 		`(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?` + // optional tag, ignored once pinned
 		`@sha256:[a-f0-9]{64}$`)
 
-var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+// envNamePattern is msbctl's ENV_NAME: uppercase only, at most 64 bytes.
+var envNamePattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 
 var hostLabelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// reservedEnv are variables a profile may neither set nor bind as a secret.
-// GH_TOKEN and the Claude token variables are refused by msbctl too; Kandev
-// delivers agent and git credentials itself through agentctl, and the
-// AGENTCTL_ prefix is how the plugin configures agentctl in the guest.
+// reservedEnv and reservedEnvPrefixes mirror msbctl's is_reserved_var() and
+// KANDEV_RESERVED_NAMES/_PREFIXES, so a profile msbctl would refuse at
+// provision is refused when it is saved instead. Kandev delivers agent and
+// git credentials itself; secret values are put in the environment of the
+// host's `msb` process, so nothing that changes how msb, the dynamic loader
+// or a shell behaves may be named; AGENTCTL_ is how agentctl is configured.
 var reservedEnv = map[string]bool{
-	"GH_TOKEN":                true,
-	"GITHUB_TOKEN":            true,
-	"CLAUDE_CODE_OAUTH_TOKEN": true,
-	"ANTHROPIC_API_KEY":       true,
-	"ANTHROPIC_AUTH_TOKEN":    true,
+	"GH_TOKEN": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
+	"GITHUB_TOKEN": true, "ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true,
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
+	"TMPDIR": true, "PWD": true, "TERM": true, "LANG": true,
 }
 
-const reservedEnvPrefix = "AGENTCTL_"
+var reservedEnvPrefixes = []string{
+	"CLAUDE_CODE_OAUTH_TOKEN_", "AGENTCTL_", "MSB_", "MSBCTL_", "LD_", "SSH_", "XDG_", "LC_",
+}
 
 // IsReservedEnv reports whether name is refused as a profile variable or
 // secret binding.
 func IsReservedEnv(name string) bool {
 	upper := strings.ToUpper(name)
-	return reservedEnv[upper] || strings.HasPrefix(upper, reservedEnvPrefix)
+	if reservedEnv[upper] {
+		return true
+	}
+	for _, prefix := range reservedEnvPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 type intField struct {
@@ -218,6 +233,9 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 			add(FieldRegistryPassword, CodeUnpaired)
 		}
 	}
+	if spec.RegistryUsername != "" && spec.Image != "" && !namesRegistry(spec.Image) {
+		add(FieldImage, CodeNoRegistry)
+	}
 
 	taken := make(map[string]bool, len(env))
 	for _, item := range env {
@@ -278,6 +296,14 @@ func parseInt(config map[string]string, f intField) string {
 	return ""
 }
 
+// namesRegistry reports whether an image reference starts with a registry
+// host, by the same rule as msbctl's kandev_registry(): a first path
+// component with a dot or a port, or `localhost`.
+func namesRegistry(image string) bool {
+	first, rest, found := strings.Cut(image, "/")
+	return found && rest != "" && (strings.ContainsAny(first, ".:") || first == "localhost")
+}
+
 // parseHostList splits a comma-separated list of `host` or `host:port`
 // entries. Egress rules are hostname-based on the sandbox host, so IP
 // literals and URLs are refused. A leading `*.` wildcard is accepted for
@@ -324,9 +350,11 @@ func validHostEntry(entry string, allowWildcard bool) bool {
 			return false
 		}
 	}
-	// An all-numeric last label means an IP literal, not a hostname.
-	_, numeric := strconv.Atoi(labels[len(labels)-1])
-	return numeric != nil
+	// An all-numeric last label means an IP literal, not a hostname, and
+	// msbctl's HOSTNAME wants a last label of at least two characters.
+	last := labels[len(labels)-1]
+	_, numeric := strconv.Atoi(last)
+	return numeric != nil && len(last) >= 2
 }
 
 // parseEnv reads `KEY=VALUE;KEY2=VALUE2`. Values cannot contain `;`.
