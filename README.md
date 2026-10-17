@@ -14,8 +14,9 @@ install, driven over SSH through a restricted forced command
 > **Status: early development.** The host registry, profile validation and
 > placement work. Provisioning is not built yet, so a profile can be saved
 > but a task cannot launch on it. See the [implementation plan](docs/plans/implementation-plan.md)
-> for the phases, and the [host protocol](docs/host-protocol.md) for what a
-> sandbox host must answer.
+> for the phases, the [host protocol](docs/host-protocol.md) for what a
+> sandbox host must answer, and the [msbctl feature request](docs/msbctl-feature-request.md)
+> for what msb-manager still has to build.
 
 ## What it adds
 
