@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -466,8 +468,19 @@ func (r *Runtime) diagnoseEgress(ctx context.Context, result *testResult, allowE
 	result.OK = false
 	if result.Problem == "" {
 		result.Problem = "egress_refused"
-		result.Hint = "The host's [kandev] allow_extra does not admit every default egress entry, so it refuses every provision. Add them there, or set allow_extra = [\"*\"] to let this Kandev server decide."
+		result.Hint = "The host's [kandev] allow_extra does not admit every default egress entry, so it refuses every provision. " +
+			"Set exactly one allow_extra line under [kandev] in the host's msbctl config: " + allowExtraLine(append(slices.Clone(allowExtra), refused...)) +
+			` to admit these, or allow_extra = ["*"] to let this Kandev server decide.`
 	}
+}
+
+// allowExtraLine is a TOML allow_extra line for entries, as msbctl reads it.
+func allowExtraLine(entries []string) string {
+	quoted := make([]string, len(entries))
+	for i, e := range entries {
+		quoted[i] = strconv.Quote(e)
+	}
+	return "allow_extra = [" + strings.Join(quoted, ", ") + "]"
 }
 
 func diagnose(health msbctl.Health, err error, publicKey string) testResult {

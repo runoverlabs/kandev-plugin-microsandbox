@@ -1,8 +1,18 @@
 # Next steps (agreed 2026-10-19)
 
-Written down before a context compaction; nothing here is built yet. The
-user asked for items 1–4. Items 5–8 are follow-ups already discussed. Section
-"State" is where testing stands.
+Written down before a context compaction, then built the same day. Each
+item starts with where it stands. Section "State" is where testing stands.
+
+| Item | Status |
+| --- | --- |
+| 1. Host setup | Built as `hosts.setup` / `hosts.setup.status` (`internal/hostsetup`). sudo: passwordless sudo is used when the login has it; without it, root's part is listed as commands. The pinned installers ran for real in a throwaway home; a full run against a fresh machine has not happened yet. |
+| 2. Readiness | Built as `setup.status`. The API URL is read from Kandev's environment (Kandev passes it to the plugin process unfiltered), else from the last launch's bootstrap. Not built: a direct TLS check from Kandev to a proxy port, which needs a running sandbox. |
+| 3. Host detail | Built: each host's last check in `hosts.list`, refreshed every 15 minutes. Host facts wait on msbctl F22 (requested). |
+| 4. UI | Built: overview, Sandbox hosts, Sandbox egress, Sandbox secrets, verified in Kandev 0.97.0. Secrets became plugin-kept and named by a `secrets` profile field, since a profile form cannot hold lists; `env` stays a string (an upstream key/value schema type would fix both). |
+| 5. msbctl | Written up as Request 5 in [msbctl-feature-request.md](../msbctl-feature-request.md): F22 host facts, F23 `host kandev configure`, F24 `self-update` under the kandev key. |
+| 6. Egress | Done: sizes bounded by msbctl's 64 KiB header; Test's hint gives the exact `allow_extra` line. |
+| 7. Kandev upstream | Not filed: waits for the user's go-ahead. |
+| 8. Smaller items | The test host's egress line is the user's call (see State). New: attach could restart a stopped sandbox with secrets now that their values live in the plugin, if resource state kept the secret names. |
 
 ## Goal
 
@@ -161,16 +171,18 @@ The plugin has only actions so far. Build:
 
 ## State (2026-10-19)
 
-- Plugin `0.1.0-dev.4` on local `main`, installed on `kandev.vild.party`
+- Plugin `0.1.0-dev.8` on local `main`, installed on `kandev.vild.party`
   (Kandev v0.97.0; Kandev itself connects out from 192.168.2.10, its name
   resolves to 192.168.2.6). Root trusted there; API URL set by the user.
 - Egress policy there: custom group `lan-llm` = `192.168.2.6:8788` (the
   FreeToken OpenAI-compatible server, no key); defaults `lan-llm`, `opencode`.
   Profile "alloy (node)": `node:22-bookworm-slim` by digest, 2 CPUs, 4 GiB,
   `workspace_gib` 10, 2 h, `agent_config_bundles = ["opencode.config"]`.
-- Host alloy (192.168.2.8): msb-manager 0.5.1, Test reports `egress_refused`
-  because `allow_extra` is still `[]`; that is the blocker for the opencode
-  run. Runtime-only firewall rules open 30000–30099 to 192.168.1.121 (this
+- Host alloy (192.168.2.8): msb-manager 0.5.1. Its `config.toml` now has
+  **two** `allow_extra` lines under `[kandev]` (the bounded one and `["*"]`),
+  which TOML refuses, so msbctl cannot load its config and Test reports
+  `unavailable`. One line must go (the user's call); that is the blocker for
+  the opencode run. Runtime-only firewall rules open 30000–30099 to 192.168.1.121 (this
   sandbox) and 192.168.2.10 (Kandev). Test leftovers: `~/kandev-test/mock-agent`,
   the `/etc/hosts` line `kandev-api.home.arpa`, config backups
   `config.toml.bak-*`, `authorized_keys.bak-kandev-*`.

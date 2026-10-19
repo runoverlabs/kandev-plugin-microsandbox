@@ -137,5 +137,6 @@ func TestTestReportsDefaultEgressTheHostRefuses(t *testing.T) {
 		assert.Equal(t, false, body["ok"], tc.allowExtra)
 		assert.Equal(t, "egress_refused", body["problem"], tc.allowExtra)
 		assert.Equal(t, tc.refused, body["egress_refused"], tc.allowExtra)
+		assert.Contains(t, body["hint"], `allow_extra = ["pypi.org", "192.168.2.6:8788", "openrouter.ai"]`, "a line to paste, keeping what the host admits")
 	}
 }
