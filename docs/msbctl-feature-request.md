@@ -722,8 +722,8 @@ proxy_port_pool  = "30000-39999"    # public TLS ports, one per published guest 
   lease means a pooled connection can only ever reach one VM port, so there
   is **no HTTP parsing and no path routing**.
 - **Per connection:** complete the TLS handshake, then read the first
-  request head (cap 16 KiB, 10 s). Check its `Authorization: Bearer` token
-  ([F18](#f18-lease-tokens)) for *this* sandbox, guest port and generation.
+  request head (cap 16 KiB, 10 s). Check its `X-Msb-Lease` token
+  ([F18](#f18-lease-tokens)) for *this* sandbox and guest port.
   On failure, answer a fixed `401` and close. On success, forward the bytes
   read so far, then splice both directions until either side closes.
   WebSocket upgrades and streaming need nothing special.
@@ -777,25 +777,45 @@ appears in argv or stdout.
   "base_url": "https://sbx-01.tailnet.ts.net:30001",
   "expires_at": "2026-10-19T12:10:00Z",
   "generation": "1",
-  "headers": {"Authorization": "Bearer v1.1792243800.…"}
+  "headers": {"X-Msb-Lease": "v1.1792244100.…"}
 }}
 ```
 
-- `token = "v1." + expiry_unix + "." + base64url(HMAC-SHA256(key, name | guest port | generation | expiry_unix))`.
-  The key is 32 random bytes in `STATE_DIR/kandev/lease.key` (0600),
-  created on first use.
-- These tokens are stateless: `lease` and the proxy share only the key
-  file, so no IPC is needed, and a proxy restart invalidates nothing. The
-  proxy accepts a token until its expiry, with 30 s of clock skew. A
-  changed `generation` (a VM restart) invalidates older tokens.
-- The plugin puts `headers` in both Kandev's `http_headers` and
+**The header cannot be `Authorization`.** Kandev rejects a lease whose
+headers include `Authorization`, `X-Instance-ID`, `Host`, `Cookie`,
+`Set-Cookie`, `Sec-WebSocket-Protocol`, a hop-by-hop header or any
+`Proxy-*` header (`endpoint_transport.go`). It also sets `Authorization` to
+agentctl's own token on every request, after the lease headers.
+
+**Self-healing is the requirement.** Kandev never re-resolves a lease on a
+401: it refreshes only 30 s before `expires_at`. A refused token therefore
+stays refused for up to 10 minutes. Nothing that happens in normal operation
+may invalidate a token Kandev is still using:
+
+- `token = "v1." + valid_until_unix + "." + base64url(HMAC-SHA256(key, name | guest port | created_at | valid_until_unix))`.
+- Bind it to the sandbox **incarnation** (`name` + `created_at`), **not**
+  to `generation`. A VM restart must not invalidate tokens, because Kandev
+  only sees the new generation at its next refresh. A recreated sandbox has
+  a new `created_at`, so old tokens die with the old sandbox.
+- **Grace:** `expires_at` in the lease is now + 10 min, but
+  `valid_until` is now + 15 min. Both are minted and checked on the host's
+  clock, and the 5 min grace absorbs skew between that clock and Kandev's.
+- **Key:** 32 random bytes in `STATE_DIR/kandev/lease.key` (0600), created
+  atomically (`O_EXCL`) by whichever of `lease` and the proxy needs it
+  first. If it is ever replaced, the previous key is kept as
+  `lease.key.prev`, and the proxy accepts both for 15 min. Tokens are
+  stateless (`lease` and the proxy share only the key file), so no IPC is
+  needed and a proxy restart invalidates nothing.
+- The plugin copies `headers` into both Kandev's `http_headers` and
   `websocket_headers`.
-- `kandev lease` output is now secret-bearing. The plugin treats it so;
+- `kandev lease` output is now secret-bearing. The plugin treats it so, and
   msbctl must not log it.
 
-**Accept:** a token for one sandbox or port is refused on another; a token
-past expiry is refused; after `start`, a token from the previous generation
-is refused.
+**Accept:** a token for one sandbox or port is refused on another, and one
+past `valid_until` is refused. After `stop`/`start`, a token minted before
+the restart still works. After `destroy` + re-`provision` of the same env,
+it does not. A token minted under a replaced key is accepted for 15 min.
+Restarting the proxy refuses nothing.
 
 ### F19: `health` reports TLS
 
@@ -809,7 +829,9 @@ is refused.
 
 - With `mode = "proxy"`, `serve.ok` means the proxy is running with a
   certificate installed and `proxy_listen` set.
-- `tls.not_after` drives the plugin's renewal: it re-issues within 30 days.
+- `tls.not_after` drives the plugin's renewal. It re-issues within 30 days,
+  from a background check every 6 h and before every placement, so a
+  certificate never lapses unattended.
 - `issuer_sha256` lets the plugin see that the host carries a certificate
   from its current root, and re-issue after a root change.
 - **Also in the `tailscale` mode:** report `serve.ok = false` when the
