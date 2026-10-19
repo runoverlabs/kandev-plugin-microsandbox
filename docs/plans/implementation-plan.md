@@ -1,6 +1,19 @@
 # Kandev × microsandbox remote executor — implementation plan
 
-Oct 14, 2026 · @Vincent Labreche · revised Oct 17, 2026 to build on msb-manager instead of a new daemon
+Oct 14, 2026 · @Vincent Labreche · revised Oct 17, 2026 to build on msb-manager instead of a new daemon · revised Oct 19, 2026 for host-side TLS with a plugin-issued root
+
+## Decision, Oct 19: host-side TLS from a plugin-issued root
+
+Kandev accepts only HTTPS connection leases and verifies them against the Kandev server's system trust store (`validateLeaseEndpointURL`, `endpoint_transport.go`; `InsecureSkipVerify` is forced off). The built-in SSH and Docker executors need no TLS because Kandev owns their transport; a plugin's lease is dialed directly, so it must be TLS. `tailscale serve` met that with the tailnet's `*.ts.net` certificate, but it ties the design to Tailscale's hosted control plane (headscale does not support Serve or `tailscale cert`, headscale issue #1921) and was still an unrun spike.
+
+The default data path is now:
+
+- **The plugin is a small certificate authority.** On request it generates a root, **name-constrained** to the sandbox hosts' domain (and optionally an address range), and keeps its key in the plugin secret store. The operator installs the root in the Kandev server's trust store; only that one machine ever needs to trust it. A leaked key can impersonate sandbox hosts and nothing else, because Go enforces name constraints.
+- **TLS terminates on each sandbox host,** in a small stdlib TLS proxy in msbctl (`[kandev] serve = "proxy"`): one TLS port per published guest port, spliced to the loopback port, with a bearer token checked on the first request of each connection. Traffic goes Kandev → host directly, never through the plugin.
+- **The plugin issues each host's certificate** at registration and renewal, and pushes it over SSH on stdin.
+- `tailscale serve` stays as an optional mode (`serve = "tailscale"`) where the tailnet supports it; an uploaded wildcard certificate or DNS-01 issuance can later replace the plugin's root as the certificate source without changing the proxy.
+
+The sections below are updated to match; "Data path" has the detail.
 
 ## What changed in this revision
 
@@ -285,9 +298,27 @@ This key **does** set egress and secret bindings, which the laptop's key may nev
 
 ## Data path: agentctl over HTTPS
 
-### Default: `tailscale serve` [new, needs spike]
+### Default: host-side TLS proxy with a plugin-issued certificate [new]
 
-On provision, msbctl maps each published port under one HTTPS listener with the host's tailnet certificate:
+`msbctl kandev proxy` is a systemd user service (installed by `host kandev install`) and the one long-running component in this design. It is stdlib only (`ssl`, `socket`, `selectors` or threads).
+
+- **One TLS listener per published guest port.** `provision` allocates, beside the four loopback ports, four public ports from `[kandev] proxy_port_pool`, bound on `[kandev] proxy_listen` (the host's tailnet or LAN address). Each splices bytes to its `127.0.0.1:<host port>`. Because every lease has its own host:port, a pooled connection can only ever reach one VM port, and the proxy needs no HTTP parser and does no path routing.
+- **Lease = `https://<host name>:<public port>`**, from `kandev lease ENV PORT`, with `http_headers` and `websocket_headers` carrying `Authorization: Bearer <token>`.
+- **Bearer tokens are stateless:** `token = expiry || HMAC-SHA256(key, name | guest port | generation | expiry)`, with the key in a 0600 file on the host. The proxy checks the first request head of each new connection (and only that one, then splices), accepting a token until its expiry. No IPC between `lease` and the proxy, and a proxy restart invalidates nothing. Kandev refreshes 30 s before expiry; established connections are unaffected.
+- **Certificate:** `CONFIG_DIR/kandev/tls/{cert,key}.pem`, written by `msbctl kandev tls install` from stdin and reloaded by the proxy on change. msbctl cannot generate keys (stdlib only, no `openssl`), so the plugin generates the host key and certificate and sends both over the SSH channel; the key is written 0600 and never printed.
+- **Defense in depth:** the network still decides who reaches the public ports (tailnet ACL or firewall: only the Kandev server); the bearer token decides which lease may; agentctl's own token, from the nonce handshake, decides who may drive agentctl.
+- `destroy` and `reap` close the listeners and free the ports; a destroyed sandbox's port refuses connections.
+
+### Plugin side: the certificate authority [new]
+
+- **`ca.create`** (admin action) takes the permitted DNS suffix (e.g. `.tailnet.ts.net` or a headscale `base_domain`) and optional permitted CIDRs, generates an ECDSA P-256 root (10-year validity) with those name constraints and `pathlen:0`, and stores the key with `SetSecret("ca-key")`. Re-running it replaces the root and requires re-issuing every host.
+- **`ca.get`** returns the root PEM, its fingerprint, the constraints, and install instructions: Debian/Ubuntu (`/usr/local/share/ca-certificates/` + `update-ca-certificates`), a container (`SSL_CERT_DIR=/etc/ssl/certs:/kandev-ca`; never `SSL_CERT_FILE`, which replaces the bundle), then restart Kandev, since Go loads roots once per process.
+- **Host certificates:** issued at `hosts.add` and on `hosts.test` when expiry is within 30 days: ECDSA P-256, 90 days, SAN = the host name from its registered `base_url` (and an IP SAN if the URL uses one), pushed with `msbctl kandev tls install`. A `base_url` outside the root's constraints is refused at `hosts.add`.
+- **Trust check:** `hosts.test` dials one of the host's proxy ports and verifies the chain against the **system roots of the plugin process**, which inherits the Kandev process environment, so "root not trusted yet" is reported before a launch fails on it.
+
+### Optional: `tailscale serve` (`serve = "tailscale"`) [needs spike S2]
+
+Where the tailnet provides HTTPS certificates (Tailscale's hosted control plane; not headscale), msbctl can instead map each published port under one HTTPS listener with the node's certificate:
 
 ```
 tailscale serve --bg --https=443 --set-path=/vm/<env>/p/8765  http://127.0.0.1:<h8765>
@@ -300,9 +331,7 @@ tailscale serve --bg --https=443 --set-path=/vm/<env>/p/8765  http://127.0.0.1:<
 - **Spike first**: does `--set-path` strip the prefix before proxying (kandev appends its own paths to `base_url`), do WebSocket upgrades pass, is the response unbuffered, and how many mappings can one node hold? If any of these fail, use the fallback.
 - msbctl only runs the `tailscale` CLI. It never needs to be root for this if the operator has granted the `msb` user serve rights (`tailscale set --operator=msb`).
 
-### Fallback: one stdlib TLS splice per port (only if the spike fails)
-
-This is a small listener in msbctl (`msbctl kandev proxy`, a systemd user service). It is the one long-running component this plan allows, and only as a fallback. One TLS listener per published guest port, terminating with the `tailscale cert` files through the stdlib `ssl` module. It checks a bearer lease on the first request head, then splices bytes to the loopback port, so no HTTP/1.1 parser is needed and a pooled connection can only ever reach one VM port. Lease tokens are then 32 random bytes, held hashed and in memory only, with a 10 min TTL, and `kandev lease` hands them out over SSH. Restarting it invalidates leases, and kandev re-resolves.
+Path routing on one listener depends on how Kandev pools connections; if this mode is kept, the spike must also show that a pooled connection never reaches another VM's path.
 
 ## Component B: kandev-plugin-microsandbox
 
@@ -420,27 +449,30 @@ This is the host's `[kandev] rule_groups`, msbctl rule groups maintained in `def
 
 ## Networking, TLS and security
 
-Control traffic is SSH with a pinned host key and a forced command. Data traffic is HTTPS on the tailnet with a publicly trusted certificate, authenticated end to end by kandev's own agentctl token.
+Control traffic is SSH with a pinned host key and a forced command. Data traffic is HTTPS to each sandbox host's proxy, with a certificate from the plugin's name-constrained root, a per-lease bearer token, and kandev's own agentctl token end to end.
 
 ### Paths that must work
 
 | From | To | Purpose | Auth |
 | --- | --- | --- | --- |
 | Plugin (on kandev server) | `ssh msb@<host>` → `msbctl host serve --kandev` | control | plugin SSH key, pinned host key |
-| kandev backend | `https://<host>.ts.net/vm/{env}/p/{port}/*` | agentctl HTTP + WebSocket | tailnet ACL, then agentctl token |
+| kandev backend | `https://<host>:<public port>/*` (the host's proxy) | agentctl HTTP + WebSocket | network ACL, lease bearer token, then agentctl token |
 | VM | kandev `api_url` | bootstrap callback probe and runtime API | scoped task credentials from kandev |
 | VM | allowlisted internet hosts | git, packages, model APIs | per-service |
 
 ### TLS
 
-- Kandev rejects non-HTTPS lease URLs and verifies certificates. `tailscale serve` uses the node's tailnet certificate (Let's Encrypt-backed) and renews it itself. The fallback proxy uses `tailscale cert` files renewed by a systemd timer.
-- Do not rely on a private CA until you confirm kandev's endpoint transport accepts one; the transport has a TLS config hook but no documented operator setting.
+- Kandev rejects non-HTTPS lease URLs and verifies certificates against the Kandev server's system roots; no production code sets a custom TLS config, and `InsecureSkipVerify` is forced off.
+- A private CA therefore works exactly when it is in the Kandev server's system trust store. The plugin's root is name-constrained so that trusting it is safe for the rest of that machine.
+- Host certificates last 90 days and are renewed by the plugin. `serve = "tailscale"` uses the node's tailnet certificate instead.
 - Host names must resolve to tailnet or private addresses; loopback and link-local are rejected by kandev.
 
 ### Keys and tokens
 
 - **Plugin SSH key**: one per plugin installation, in the plugin secret store. On each host it is authorized only for `host serve --kandev`. To rotate it, authorize the new key on every host, switch the plugin over, then remove the old line.
 - **The operator's laptop key** stays on `host serve` (no `--kandev`) and cannot run kandev verbs. The kandev key cannot run the operator's verbs. A host's `authorized_keys` therefore holds at most three kinds of line: the laptop's restricted key, an optional `--admin` `sk-` key, and the plugin's `--kandev` key **[exists: `host authorize`, `--admin`; new: `--kandev`]**.
+- **Plugin CA key**: in the plugin secret store (`ca-key`); never leaves it. Host keys and certificates are generated by the plugin and sent once over SSH stdin.
+- **Lease tokens**: HMAC tokens minted by `kandev lease` with a host-local key; they travel only in lease headers, never in URLs or logs.
 - **agentctl token**: generated by agentctl, obtained by kandev through the nonce handshake. The plugin and msbctl never see it.
 - **Extra secrets**: in the plugin's secret store (as profile secrets) and, during one `msb` call, in that process's environment on the host. They are never in a registry entry, `secrets/`, argv or logs, and never inside the guest, which only sees the placeholder.
 
@@ -517,11 +549,12 @@ Seven phases, each ending in a demonstrable check. Do not start a phase until th
 2. **Phase 1 — msbctl kandev core.** `[kandev]` config, the `kandev` entry kind and template, `provision`, `inspect`, `find`, `list`, `start`, `stop`, `expiry`, `destroy`, `health`, the lock, labels, the `is_kandev` skips.
    - Accept: create is idempotent by operation id; a mismatched digest returns `conflict`; delete of an absent VM succeeds; no secret value reaches argv, stdout or any file (`assert_not_in_argv` **[exists]**); capacity refusal returns `rate_limited`.
 3. **Phase 2 — agentctl, leases, data path, reaper.** `kandev agentctl`, `kandev lease`, the serve mappings, `kandev reap`, `host kandev install`, `host serve --kandev`, `host authorize --kandev`.
-   - Accept: from the kandev server, a curl through a leased `base_url` reaches agentctl's control port; a WebSocket echo through it works; a destroyed VM's path returns 404; the kandev key is refused for every operator verb and the laptop key for every kandev verb.
-4. **Phase 3 — plugin skeleton and host registry.** Manifest, Sandbox Hosts page, actions, plugin state and secrets, key generation and host-key pinning, `ValidateExecutorProfile`, placement.
-   - Accept: plugin installs on kandev 0.97+; hosts can be added, tested and drained; a profile saves only with valid placement and a digest-pinned image.
+   - Phase 2b (Oct 19 decision): `[kandev] serve = "proxy"`, `msbctl kandev proxy` (installed by `host kandev install`), `kandev tls install`, HMAC lease tokens, `health.tls`.
+   - Accept: from the kandev server, a curl through a leased `base_url` with its bearer header reaches agentctl's control port, and without it is refused; a WebSocket echo through it works; a destroyed VM's port refuses connections; the kandev key is refused for every operator verb and the laptop key for every kandev verb.
+4. **Phase 3 — plugin skeleton and host registry.** Manifest, Sandbox Hosts page, actions, plugin state and secrets, key generation and host-key pinning, `ValidateExecutorProfile`, placement. Then the certificate authority: `ca.create`/`ca.get`, host certificate issuance and renewal through `kandev tls install`, and the trust check in `hosts.test`.
+   - Accept: plugin installs on kandev 0.97+; hosts can be added, tested and drained; a profile saves only with valid placement and a digest-pinned image; with the root installed on the Kandev server, `hosts.test` reports the host's certificate as trusted, and without it reports that it is not.
 5. **Phase 4 — happy path.** `Provision`, `ResolveExecutorConnection`, `Inspect`, `Destroy`.
-   - Accept: a kandev task on the new profile clones the repo, runs repository setup, starts the agent, and shows terminal, files, git changes and the embedded editor; archiving the task removes the VM and its serve mappings.
+   - Accept: a kandev task on the new profile clones the repo, runs repository setup, starts the agent, and shows terminal, files, git changes and the embedded editor; archiving the task removes the VM and closes its proxy ports.
 6. **Phase 5 — resilience.** `RecoverExecutorOperation`, `AttachExecutorEnvironment` with re-sent secrets, expiry handling, capacity and `rate_limited`.
    - Accept: every chaos test in the Test plan passes.
 7. **Phase 6 — packaging and ops.** `make package` for the plugin. On the msb-manager side, a docs page "Kandev hosts" (setup, `[kandev]`, authorize, timer, tailnet ACL). Hosts are set up with the existing `msbctl remote setup` plus `host kandev install`.
@@ -562,8 +595,9 @@ Unit tests cover each component against fakes. The chaos suite below runs agains
 
 The biggest risks are the `tailscale serve` data path (is no daemon actually enough?) and kandev features that may not work with per-session VMs. Phase 0 and early Phase 4 exist to retire them.
 
-- [ ] Does `tailscale serve` with path mappings meet kandev's needs (prefix stripping, WebSocket, streaming, scale)? If not, build the fallback TLS splice. (Phase 0)
-- [ ] Is the tailnet ACL plus agentctl's own token enough auth for the data path, or do we want the per-lease bearer anyway? The latter requires the fallback proxy.
+- [x] ~~Does `tailscale serve` meet kandev's needs?~~ No longer gating: the default is the host-side proxy (decision of Oct 19). S2 only matters for the optional `serve = "tailscale"` mode.
+- [x] ~~Tailnet ACL alone, or a per-lease bearer too?~~ Both: the proxy checks a bearer token per connection.
+- [ ] When a lease's token is refused (401 after a host clock jump or key rotation), does Kandev re-resolve the lease, or only on transport loss? Check `endpoint_transport.go` before Phase 4.
 - [ ] Does an agentctl restarted after a VM restart need a new nonce from kandev, and does attach provide one? Compare with the SSH executor.
 - [x] ~~Does an instance port range of 8 suffice?~~ Resolved: kandev only leases 8765 and the instance port; previews and the editor go through agentctl's proxy. A range of 3 (41001–41003) leaves spares. Re-check at the pinned commit.
 - [ ] Is any agentctl startup configuration beyond nonce, listen host and port required (`InternalAgentctlStartupConfigEnv` in the launcher)?
@@ -571,7 +605,7 @@ The biggest risks are the `tailscale serve` data path (is no daemon actually eno
 - [ ] On session stop, keep the VM running until expiry, or stop it to free RAM and start it on attach? Decide after measuring resume time. Each idle VM costs about 300 MB. Guest page cache is not returned on its own, but `msbctl reclaim` does it **[exists]**.
 - [ ] Should `[kandev] allow_extra` default to empty (trust the kandev server's profiles) or to a list?
 - [ ] Exact manifest field names for plugin state, secrets and actions at the pinned commit.
-- [ ] Does kandev's endpoint transport support a private CA? If not, tailnet certificates are required, which `tailscale serve` already uses.
+- [x] ~~Does kandev's endpoint transport support a private CA?~~ Only through the Kandev server's system trust store; hence the name-constrained root.
 - [ ] Where base images are built and pushed (CI per project vs a shared builder), and registry auth on the hosts.
 
 * Risk: the plugin SDK is pre-1.0 and consumed through a source `replace`; pin `.kandev-sdk-ref` and re-run contract tests on every kandev upgrade.

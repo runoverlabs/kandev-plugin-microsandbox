@@ -86,7 +86,8 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
   limits. `max_memory` is reported in MiB.
 - `platform` is the guest's `<goos>-<goarch>`, as Kandev names platforms.
 - `base_url` is `[kandev] base_url`, the HTTPS base leases are built on.
-- `serve.mode` is `[kandev] serve`: `tailscale` or `none`. `serve.ok` means
+- `serve.mode` is `[kandev] serve`: `tailscale` or `none` today; `proxy`, the
+  planned default, is requested in the feature request (F16, F19). `serve.ok` means
   `tailscale status` shows a running node with a DNS name (always true with
   `none`). A `reason` sent when it is not ok is msbctl's text and is not
   read.

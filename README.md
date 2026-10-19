@@ -31,8 +31,12 @@ install, driven over SSH through a restricted forced command
   are on by default.
 - Sandbox hosts: Linux with KVM, set up as msb-manager remotes, with msbctl
   speaking [host protocol](docs/host-protocol.md) version 1.
-- A private network between Kandev and the hosts (Tailscale is the default
-  design: the data path uses `tailscale serve`).
+- A private network between Kandev and the hosts: Tailscale, headscale,
+  WireGuard or a LAN. Kandev reaches each sandbox over HTTPS, and the planned
+  default is a TLS proxy on each host with a certificate from the plugin's own
+  root, which you trust on the Kandev server once. That is not built yet:
+  see the [implementation plan](docs/plans/implementation-plan.md),
+  "Decision, Oct 19".
 
 ## Install
 

@@ -63,7 +63,7 @@ A host:
 | `protocol` | msbctl speaks a different host protocol version. |
 | `disabled` | `[kandev] enabled` is not true in the host's msbctl config. |
 | `no_kvm` | `/dev/kvm` is missing on the host. |
-| `no_data_path` | `tailscale serve` is not up on the host. |
+| `no_data_path` | The host's HTTPS front end for sandboxes is not up (for `serve = "tailscale"`: tailscaled is not running with a DNS name). |
 | `unavailable` | msbctl ran but returned no health report. |
 
 The plugin has **one SSH key** for every host. It is generated on first use,
