@@ -59,6 +59,10 @@ func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionR
 		handler = r.actionCAGet
 	case ActionCACreate:
 		handler = r.actionCACreate
+	case ActionHostsSetup:
+		handler = r.actionSetup
+	case ActionHostsSetupStatus:
+		handler = r.actionSetupJobStatus
 	case ActionSetupStatus:
 		handler = r.actionSetupStatus
 	case ActionEgressList:

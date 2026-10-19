@@ -168,18 +168,24 @@ func (p *Pool) evict(name string, client *ssh.Client) {
 }
 
 func (p *Pool) dial(ctx context.Context, h hosts.Host) (*ssh.Client, error) {
-	pinned, err := ParseHostKey(h.HostKey)
+	return dialPinned(ctx, p.dialer, h.SSH, h.HostKey, []ssh.AuthMethod{ssh.PublicKeys(p.signer)})
+}
+
+// dialPinned connects to dest and authenticates with auth, accepting only
+// the pinned host key.
+func dialPinned(ctx context.Context, dialer Dialer, dest, hostKey string, auth []ssh.AuthMethod) (*ssh.Client, error) {
+	pinned, err := ParseHostKey(hostKey)
 	if err != nil {
 		return nil, err
 	}
-	user, host, port, err := hosts.ParseSSH(h.SSH)
+	user, host, port, err := hosts.ParseSSH(dest)
 	if err != nil {
 		return nil, err
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	conn, err := p.dialer.DialContext(dialCtx, "tcp", address)
+	conn, err := dialer.DialContext(dialCtx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", address, err)
 	}
@@ -187,7 +193,7 @@ func (p *Pool) dial(ctx context.Context, h hosts.Host) (*ssh.Client, error) {
 	defer stop()
 	config := &ssh.ClientConfig{
 		User:              user,
-		Auth:              []ssh.AuthMethod{ssh.PublicKeys(p.signer)},
+		Auth:              auth,
 		HostKeyAlgorithms: hostKeyAlgorithms(pinned),
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if !bytes.Equal(key.Marshal(), pinned.Marshal()) {

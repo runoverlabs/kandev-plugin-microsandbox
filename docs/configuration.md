@@ -23,6 +23,8 @@ with any workspace as the action scope).
 | `ca.get` | `{}` | The plugin's root certificate (PEM, SHA-256, constraints, expiry), whether this Kandev server trusts it yet, and how to install it. `exists: false` before `ca.create`. |
 | `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. |
 | `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. The result becomes the host's `status`. |
+| `hosts.setup` | below | Sets up a bare machine over an admin login and registers it: [Setting up a new machine](#setting-up-a-new-machine). Returns 202 with a job. |
+| `hosts.setup.status` | `{"id": "..."}` | A setup job's steps so far. Jobs live in memory, for an hour after they finish. |
 | `setup.status` | `{}` | The Kandev server's own one-time setup, item by item (below), each with what to do when it is not ready. |
 
 A host:
@@ -87,10 +89,77 @@ store.
 **Host certificates need no attention.** The plugin issues one when a host is
 added. It re-issues one whenever a host reports none, one expiring within 30
 days, one for another name, or one from a replaced root. It checks from a
-background pass every 6 hours and on every **Test**. A host whose
+background pass every 15 minutes and on every **Test**. A host whose
 `base_url` is outside the root's constraints is refused at `hosts.add`.
 
-### Adding a host
+### Setting up a new machine
+
+`hosts.setup` turns a bare Linux machine with KVM into a registered host,
+from an admin SSH login you give once. Nothing else is needed on the
+machine first.
+
+1. `hosts.scan` with the admin destination (`ubuntu@203.0.113.10`), and
+   compare the fingerprint with the machine's (on EC2, the instance's
+   console output lists it).
+2. `hosts.setup`:
+
+   ```json
+   {
+     "name": "sbx-01",
+     "ssh": "ubuntu@203.0.113.10",
+     "host_key": "ssh-ed25519 AAAA...",
+     "admin_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+     "base_url": "https://sbx-01.example.com",
+     "labels": ["default"],
+     "egress_from_plugin": true
+   }
+   ```
+
+   - `admin_key` (with `admin_key_passphrase` if it has one) or
+     `admin_password`: the login. It is used for this setup only, held in
+     memory, and never stored, logged or shown.
+   - `base_url`: the name Kandev reaches the machine at, within the root's
+     constraints. Defaults to `https://<the ssh host>`; an address there
+     needs the root's `cidrs` to cover it.
+   - `account`: the account msb-manager runs under, default `msb`.
+   - `egress_from_plugin`: writes `allow_extra = ["*"]`, so this plugin's
+     egress policy decides what sandboxes reach ([Egress](#egress)).
+     Without it the host admits nothing beyond its own rule groups.
+   - `kandev_address`: the address the host firewall admits. Defaults to
+     the address the setup's SSH connection comes from, which is the Kandev
+     server's as the machine sees it.
+
+   It answers 202 with a job; `hosts.setup.status` with `{"id": "..."}`
+   follows it (Kandev gives an action 15 seconds, and a setup takes
+   minutes).
+
+The steps, each reported `ok`, `changed`, `manual`, `failed` or `skipped`:
+
+| Step | Does |
+| --- | --- |
+| `probe` | Linux on x86_64 or aarch64, `/dev/kvm` present (else it stops: on EC2 use a `.metal` instance type), and whether the login has passwordless sudo. |
+| `packages` | Installs python3 (3.11+ is required), git, curl and tar with apt or dnf, and `dbus-user-session` on Debian and Ubuntu. |
+| `account` | Creates the `msb` account (no sudo, 0700 home), adds it to `/dev/kvm`'s group, and enables lingering so its user services run without a login. |
+| `msb`, `msb-manager` | Installs msb 0.7.7 and msb-manager 0.5.1 from their own installers, each pinned by sha256; never downgrades. |
+| `config` | Appends `[kandev]` to msbctl's `config.toml`: `serve = "proxy"`, `proxy_listen` on the machine's own address for the connection, `base_url`. An existing section is left alone (see `verify`). |
+| `services` | `msbctl host kandev install` (the TLS proxy and the reaper), only when something changed or a service is down. |
+| `firewall` | With firewalld or ufw active, opens TCP 30000–39999 to the Kandev server's address only. |
+| `authorize` | `msbctl host authorize '<plugin key>' --kandev --replace` for the account. |
+| `verify` | The host's own `health`, compared with what the setup would write; a difference is reported with the lines to change. |
+| `register`, `test` | Registers the host as `msb@<machine>` with the confirmed host key, issues its certificate and runs Test. |
+
+Without passwordless sudo, msb-manager is set up for the login itself, and
+the steps that need root are reported `manual` with the commands to run.
+Run `hosts.setup` again afterwards: every step is idempotent, so a second
+run on a set-up machine changes nothing, and one on a drifted machine
+repairs it. The job also lists what it cannot do from inside the machine:
+a cloud firewall (an EC2 security group) must allow TCP 30000–39999 from
+the Kandev server.
+
+A failed step shows the end of its command's output. That is the one place
+the plugin shows output from a host: it is your machine and your login.
+
+### Adding a host that is already set up
 
 1. `hosts.list`, and run the returned `authorize` command on the host:
    `msbctl host authorize '<plugin public key>' --kandev`.

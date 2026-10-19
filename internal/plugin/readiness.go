@@ -152,7 +152,7 @@ func (r *Runtime) hostsItem(ctx context.Context) (readinessItem, error) {
 	}
 	if len(registry.Hosts) == 0 {
 		item.State, item.Detail = readyMissing, "No sandbox host is registered."
-		item.Fix = []string{"Add one with hosts.bootstrap (an admin SSH login, used once) or hosts.add (a host already set up)."}
+		item.Fix = []string{"Add one with hosts.setup (an admin SSH login, used once) or hosts.add (a host already set up)."}
 		return item, nil
 	}
 	status, err := r.loadStatus(ctx)

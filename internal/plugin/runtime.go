@@ -62,6 +62,8 @@ type Runtime struct {
 	trustPool *x509.CertPool
 	now       func() time.Time
 
+	jobs jobs
+
 	maintMu     sync.Mutex
 	maintFirst  time.Duration
 	maintEvery  time.Duration // zero disables the maintainer
@@ -177,9 +179,11 @@ func (r *Runtime) client(ctx context.Context) (*msbctl.Client, error) {
 	return msbctl.New(pool), nil
 }
 
-// Close stops the maintainer and drops every SSH connection.
+// Close stops the maintainer and any host setup, and drops every SSH
+// connection.
 func (r *Runtime) Close() {
 	r.stopMaintainer()
+	r.jobs.stop()
 	r.keyMu.Lock()
 	defer r.keyMu.Unlock()
 	if r.pool != nil {

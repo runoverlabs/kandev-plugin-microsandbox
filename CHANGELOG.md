@@ -50,6 +50,16 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
   bounded by msbctl's real limit, its 64 KiB provision header: a sandbox's
   egress list gets 32 KiB of it, and a provision that would not fit fails
   with `invalid_config` (`requestTooLarge`) before anything is created.
+- `hosts.setup`: set up a bare KVM machine (an EC2 `.metal` instance, say)
+  from an admin SSH login used once and never stored, then register and test
+  it. It checks for KVM first, installs missing packages, creates a no-sudo
+  `msb` account with KVM access and lingering user services, installs msb
+  0.7.7 and msb-manager 0.5.1 from installers pinned by sha256, writes
+  `[kandev]` (proxy on the machine's own address, `allow_extra = ["*"]` when
+  asked), starts the services, opens firewalld or ufw to the Kandev server's
+  address only, and authorizes the plugin's key. Every step is idempotent;
+  without passwordless sudo, root's part is listed as commands to run.
+  `hosts.setup.status` follows the job.
 - Host status: `hosts.list` shows each host's last check (`checked_at`,
   `ok`, `problem`, `hint`, the health report) without contacting any host.
   Test and the maintainer, which now checks every host every 15 minutes,

@@ -20,7 +20,23 @@ import (
 // Reply is what the fake host answers to one command.
 type Reply struct {
 	Stdout string
+	Stderr string
 	Status int
+}
+
+// Option changes how a server authenticates.
+type Option func(*ssh.ServerConfig)
+
+// WithPassword also accepts password, for any user.
+func WithPassword(password string) Option {
+	return func(c *ssh.ServerConfig) {
+		c.PasswordCallback = func(_ ssh.ConnMetadata, given []byte) (*ssh.Permissions, error) {
+			if string(given) == password {
+				return nil, nil
+			}
+			return nil, errors.New("wrong password")
+		}
+	}
 }
 
 // Handler answers one exec request. Command is the raw command line, as
@@ -54,7 +70,7 @@ type Server struct {
 
 // Start runs a server that accepts only clientKey. It stops when the test
 // ends.
-func Start(t testing.TB, clientKey ssh.PublicKey, handler Handler) *Server {
+func Start(t testing.TB, clientKey ssh.PublicKey, handler Handler, opts ...Option) *Server {
 	t.Helper()
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -81,6 +97,9 @@ func Start(t testing.TB, clientKey ssh.PublicKey, handler Handler) *Server {
 			}
 			return nil, errors.New("key not authorized")
 		},
+	}
+	for _, opt := range opts {
+		opt(s.config)
 	}
 	s.config.AddHostKey(signer)
 	s.wg.Add(1)
@@ -193,6 +212,7 @@ func (s *Server) session(user string, channel ssh.Channel, requests <-chan *ssh.
 		s.mu.Unlock()
 		reply := s.handler(payload.Command, stdin)
 		_, _ = io.WriteString(channel, reply.Stdout)
+		_, _ = io.WriteString(channel.Stderr(), reply.Stderr)
 		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(reply.Status)}))
 		return
 	}

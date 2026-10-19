@@ -61,6 +61,14 @@ actions:
     scope: "workspace"
     access: "admin"
     max_body_bytes: 1024
+  - key: "hosts.setup"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 32768
+  - key: "hosts.setup.status"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
   - key: "hosts.test"
     scope: "workspace"
     access: "admin"

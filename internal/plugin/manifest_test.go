@@ -77,7 +77,7 @@ func TestManifestActionsAreTheHandledOnesAndAdminOnly(t *testing.T) {
 		ActionCACreate, ActionCAGet,
 		ActionEgressDefaults, ActionEgressList, ActionEgressPut, ActionEgressRemove,
 		ActionHostsAdd, ActionHostsDrain, ActionHostsList, ActionHostsRemove,
-		ActionHostsScan, ActionHostsTest, ActionHostsUpdate, ActionSetupStatus,
+		ActionHostsScan, ActionHostsSetup, ActionHostsSetupStatus, ActionHostsTest, ActionHostsUpdate, ActionSetupStatus,
 	}, keys)
 }
 
