@@ -117,6 +117,11 @@ Found on the first real run (Kandev 0.97.0, msb-manager 0.4.0):
   agent in `/workspace`, and nothing else creates it. msb-manager 0.5.0 gives
   each sandbox its own disk there; 0.4.0 does not, so Test reports
   `outdated` there and placement skips it.
+- **One root per sandbox host.** A host holds one certificate. If two Kandev
+  servers (two plugin installations, each with its own root) register the
+  same host, each one re-issues the certificate from its own root whenever
+  it checks the host, and the other loses it. Give each Kandev server its
+  own hosts.
 - **Terminal-passthrough agents and the task's shell terminal do not run in
   the sandbox** in Kandev 0.97.0: Kandev starts them on the Kandev server
   instead. Use agents that speak ACP.
