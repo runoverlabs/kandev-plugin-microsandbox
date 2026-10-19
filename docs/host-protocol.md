@@ -92,6 +92,12 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 - `egress` (optional, feature request F21) is `{"allow_extra": [...]}`, the
   host's bound on provision's `egress_allow`. When present, Test checks the
   plugin's default egress groups against it.
+- `host` (optional, feature request F22) describes the machine, for the
+  operator: `os` (`/etc/os-release` `PRETTY_NAME`), `kernel`, `cpus`,
+  `memory_total_mib`, `memory_available_mib`, `load_1m`, `disk_total_gib`
+  and `disk_free_gib` (the filesystem holding sandboxes), `uptime_seconds`.
+  The plugin shows it in the host list and never places on it. Strings are
+  cut to 120 printable characters before they reach a browser.
 - `enabled` is `[kandev] enabled` from the host's msbctl config.
 - `capacity` counts **kandev sandboxes only**, against the `[kandev]`
   limits. `max_memory` is reported in MiB.
@@ -110,7 +116,9 @@ without room for the requested CPUs and memory and a sandbox slot, then picks
 the most free memory, then the fewest sandboxes, then the name. The host
 enforces the same limits again under its own lock at provision time.
 
-Used by: placement, and the Sandbox Hosts page's **Test**.
+Used by: placement, the Sandbox Hosts page's **Test**, and the maintainer,
+which checks every host every 15 minutes and keeps the result for the host
+list.
 
 ### `msbctl ls --json`
 

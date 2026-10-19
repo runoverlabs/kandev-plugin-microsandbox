@@ -125,8 +125,10 @@ Verified in `../kandev` at v0.97.0.
 ## Background work
 
 `Runtime.SetHost` starts one maintainer goroutine (`maintainer.go`); `Close`
-cancels and drains it, and nothing restarts it after. Each pass re-issues
-host certificates that need it. Tests set `maintEvery = 0` and call
+cancels and drains it, and nothing restarts it after. Each pass, every 15
+minutes, runs Test's check (`checkHost`) on every host: that re-issues host
+certificates that need it, and the result is kept as the host's status for
+`hosts.list` (`status.go`). Tests set `maintEvery = 0` and call
 `maintainHosts` directly.
 
 ## Conventions

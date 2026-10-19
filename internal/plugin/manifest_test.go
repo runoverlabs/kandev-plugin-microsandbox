@@ -71,12 +71,13 @@ func TestManifestActionsAreTheHandledOnesAndAdminOnly(t *testing.T) {
 	}
 	sort.Strings(keys)
 	// ca.create and ca.get manage the root certificate (host-side TLS);
-	// egress.* the plugin-wide egress policy.
+	// egress.* the plugin-wide egress policy; setup.status the Kandev
+	// server's own setup.
 	assert.Equal(t, []string{
 		ActionCACreate, ActionCAGet,
 		ActionEgressDefaults, ActionEgressList, ActionEgressPut, ActionEgressRemove,
 		ActionHostsAdd, ActionHostsDrain, ActionHostsList, ActionHostsRemove,
-		ActionHostsScan, ActionHostsTest, ActionHostsUpdate,
+		ActionHostsScan, ActionHostsTest, ActionHostsUpdate, ActionSetupStatus,
 	}, keys)
 }
 

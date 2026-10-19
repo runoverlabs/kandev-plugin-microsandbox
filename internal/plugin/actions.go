@@ -59,6 +59,8 @@ func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionR
 		handler = r.actionCAGet
 	case ActionCACreate:
 		handler = r.actionCACreate
+	case ActionSetupStatus:
+		handler = r.actionSetupStatus
 	case ActionEgressList:
 		handler = r.actionEgressList
 	case ActionEgressPut:
@@ -113,10 +115,12 @@ func decode(body []byte, into any) error {
 	return decoder.Decode(into)
 }
 
-// hostView is a host as the page shows it, with its key fingerprint.
+// hostView is a host as the page shows it, with its key fingerprint and,
+// in the list, its last check.
 type hostView struct {
 	hosts.Host
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint string      `json:"fingerprint"`
+	Status      *hostStatus `json:"status,omitempty"`
 }
 
 func viewOf(h hosts.Host) hostView {
@@ -139,9 +143,17 @@ func (r *Runtime) actionList(ctx context.Context, body []byte) response {
 	if err != nil {
 		return internalFailure(ActionHostsList, err)
 	}
+	status, err := r.loadStatus(ctx)
+	if err != nil {
+		return internalFailure(ActionHostsList, err)
+	}
 	views := make([]hostView, 0, len(registry.Hosts))
 	for _, h := range registry.Hosts {
-		views = append(views, viewOf(h))
+		view := viewOf(h)
+		if s, found := status[h.Name]; found {
+			view.Status = &s
+		}
+		views = append(views, view)
 	}
 	return ok(map[string]any{
 		"public_key": publicKey,
@@ -344,6 +356,7 @@ func (r *Runtime) actionRemove(ctx context.Context, body []byte) response {
 	if err != nil {
 		return internalFailure(ActionHostsRemove, err)
 	}
+	r.forgetStatus(ctx, in.Name)
 	return ok(map[string]any{"removed": in.Name})
 }
 
@@ -359,6 +372,9 @@ type testResult struct {
 	// EgressRefused are default-group entries the host's allow_extra would
 	// refuse, which fails every provision there.
 	EgressRefused []string `json:"egress_refused,omitempty"`
+	// outcome is what certificate care did, for the maintainer; TLS
+	// carries it to the operator for proxy hosts only.
+	outcome tlsOutcome
 }
 
 func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
@@ -380,6 +396,15 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 	if err != nil {
 		return internalFailure(ActionHostsTest, err)
 	}
+	result := r.checkHost(ctx, client, h)
+	r.recordStatus(ctx, h.Name, result)
+	return ok(result)
+}
+
+// checkHost is Test's diagnosis, also run by the maintainer: health, then
+// certificate care, then what the host's answer says about TLS, its base URL
+// and egress.
+func (r *Runtime) checkHost(ctx context.Context, client *msbctl.Client, h hosts.Host) testResult {
 	_, publicKey, _ := r.key(ctx)
 	health, err := client.Health(ctx, h)
 	var outcome tlsOutcome
@@ -391,6 +416,8 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 		if outcome.State == tlsRenewed {
 			health, err = client.Health(ctx, h)
 		}
+	} else {
+		outcome = tlsOutcome{State: tlsFailed, Reason: "unreachable"}
 	}
 	result := diagnose(health, err, publicKey)
 	if err == nil && health.Serve.Mode == msbctl.ServeProxy {
@@ -405,7 +432,8 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 	if err == nil && health.Egress != nil {
 		r.diagnoseEgress(ctx, &result, health.Egress.AllowExtra)
 	}
-	return ok(result)
+	result.outcome = outcome
+	return result
 }
 
 // diagnoseEgress checks the policy's default groups against the host's

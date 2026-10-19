@@ -53,6 +53,25 @@ func TestHealthDecodesAndSendsVerb(t *testing.T) {
 	assert.True(t, health.Usable())
 }
 
+// F22: what the host reports about itself, kept short and printable since
+// it reaches a browser.
+func TestHealthReadsHostFacts(t *testing.T) {
+	withFacts := strings.Replace(healthy, `"features":`, `"host":{"os":"Debian GNU/Linux 13 (trixie)\u001b[31m","kernel":"`+
+		strings.Repeat("6", 300)+`","cpus":16,"memory_total_mib":64000,"memory_available_mib":51000,"load_1m":0.42,
+		"disk_total_gib":900.5,"disk_free_gib":512.25,"uptime_seconds":86400},"features":`, 1)
+	health, err := New(&fakeRunner{reply: reply{stdout: withFacts}}).Health(context.Background(), hosts.Host{})
+	require.NoError(t, err)
+	require.NotNil(t, health.Host)
+	assert.Equal(t, "Debian GNU/Linux 13 (trixie)[31m", health.Host.OS, "control characters are dropped")
+	assert.Len(t, health.Host.Kernel, maxReportedText)
+	assert.Equal(t, HostFacts{OS: health.Host.OS, Kernel: health.Host.Kernel, CPUs: 16, MemoryTotalMiB: 64000,
+		MemoryAvailableMiB: 51000, Load1m: 0.42, DiskTotalGiB: 900.5, DiskFreeGiB: 512.25, UptimeSeconds: 86400}, *health.Host)
+
+	health, err = New(&fakeRunner{reply: reply{stdout: healthy}}).Health(context.Background(), hosts.Host{})
+	require.NoError(t, err)
+	assert.Nil(t, health.Host, "older hosts report none")
+}
+
 func TestHealthRefusesOtherProtocolVersions(t *testing.T) {
 	runner := &fakeRunner{reply: reply{stdout: `{"protocol":2,"kvm":true,"enabled":true,"serve":{"ok":true},"tls":{"installed":false},"features":["workspace_disk"]}`}}
 	_, err := New(runner).Health(context.Background(), hosts.Host{})

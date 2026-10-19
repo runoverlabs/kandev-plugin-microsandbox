@@ -14,7 +14,7 @@ with any workspace as the action scope).
 
 | Action | Body | Does |
 | --- | --- | --- |
-| `hosts.list` | `{}` | The hosts, each with its pinned key's SHA256 fingerprint, plus the plugin's public key and the exact `authorize` command to run on a host. Generates the plugin's key on first use. |
+| `hosts.list` | `{}` | The hosts, each with its pinned key's SHA256 fingerprint and its last check (`status`, below), plus the plugin's public key and the exact `authorize` command to run on a host. Generates the plugin's key on first use. Contacts no host. |
 | `hosts.scan` | `{"ssh": "msb@sbx-01.tailnet.ts.net"}` | Connects and returns the host key the server presents, with its fingerprint, for the operator to compare with `ssh-keygen -lf` on the host. Stores nothing. |
 | `hosts.add` | a host (below) | Registers a host. Returns 201. |
 | `hosts.update` | a host | Replaces a host's SSH destination, pinned key, base URL and labels. The name cannot change, and the draining flag is kept. |
@@ -22,7 +22,8 @@ with any workspace as the action scope).
 | `hosts.remove` | `{"name": "...", "force": false}` | Asks the host for its kandev sandboxes and refuses (409) while it has any. If the host cannot be reached, it refuses (502) unless `force` is set. |
 | `ca.get` | `{}` | The plugin's root certificate (PEM, SHA-256, constraints, expiry), whether this Kandev server trusts it yet, and how to install it. `exists: false` before `ca.create`. |
 | `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. |
-| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. |
+| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. The result becomes the host's `status`. |
+| `setup.status` | `{}` | The Kandev server's own one-time setup, item by item (below), each with what to do when it is not ready. |
 
 A host:
 
@@ -46,6 +47,24 @@ A host:
   link-local, multicast or unspecified address, which Kandev refuses for
   connection leases.
 - `labels`: what `label:<x>` placements select. Lowercased and deduplicated.
+
+A host's `status` in `hosts.list` is its last check, by Test or by the
+plugin's maintainer, which checks every host every 15 minutes: `checked_at`,
+`ok`, `problem` and `hint` as Test returns them, and the health report. That
+report has versions, capacity, TLS and `allow_extra`, and on hosts with
+feature request F22 also `host`: OS, kernel, CPUs, memory, load, disk and
+uptime.
+
+### Kandev server readiness
+
+`setup.status` returns `ready` and three items, each with a `state`, a
+`detail` and, when not `ok`, the steps to `fix` it:
+
+| Item | States | Checks |
+| --- | --- | --- |
+| `root` | `ok`, `missing`, `untrusted` | The plugin's root exists and the Kandev server's system roots trust it. |
+| `api_url` | `ok`, `invalid`, `unknown` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`, which every plugin launch needs, against Kandev's own rules (below). Kandev passes its environment to the plugin, so the plugin reads it there. A value set in Kandev's config file instead is invisible to the plugin until a launch carries it, so before the first launch the state is `unknown`, and afterwards the URL the last launch carried counts. |
+| `hosts` | `ok`, `missing`, `unchecked`, `failing` | At least one registered host passes its last check; failing hosts are named with their problem. |
 
 ### The root certificate
 

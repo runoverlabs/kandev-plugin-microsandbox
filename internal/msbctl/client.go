@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
+	"unicode"
 
 	"kandev-plugin-microsandbox/internal/hosts"
 )
@@ -125,6 +127,51 @@ type Health struct {
 	// Egress is the host's bound on what a provision may add (feature
 	// request F21); absent on hosts that do not report it.
 	Egress *EgressPolicy `json:"egress,omitempty"`
+	// Host describes the machine (feature request F22); absent on hosts
+	// that do not report it.
+	Host *HostFacts `json:"host,omitempty"`
+}
+
+// HostFacts are what a host reports about itself, for the operator. None is
+// secret, and none is used for placement: Capacity is what placement reads.
+type HostFacts struct {
+	OS                 string  `json:"os,omitempty"`     // /etc/os-release PRETTY_NAME
+	Kernel             string  `json:"kernel,omitempty"` // uname -r
+	CPUs               int     `json:"cpus,omitempty"`
+	MemoryTotalMiB     int     `json:"memory_total_mib,omitempty"`
+	MemoryAvailableMiB int     `json:"memory_available_mib,omitempty"`
+	Load1m             float64 `json:"load_1m,omitempty"`
+	// Disk is the filesystem holding sandboxes and their workspace disks.
+	DiskTotalGiB  float64 `json:"disk_total_gib,omitempty"`
+	DiskFreeGiB   float64 `json:"disk_free_gib,omitempty"`
+	UptimeSeconds int64   `json:"uptime_seconds,omitempty"`
+}
+
+// maxReportedText bounds a host-reported string the operator is shown.
+const maxReportedText = 120
+
+// reportedText keeps a host-reported string printable and short: it reaches
+// a browser, and the host is not trusted to format it.
+func reportedText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if b.Len() >= maxReportedText {
+			break
+		}
+		if unicode.IsPrint(r) {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (h *Health) clean() {
+	for _, s := range []*string{&h.MsbctlVersion, &h.MsbVersion, &h.Platform} {
+		*s = reportedText(*s)
+	}
+	if h.Host != nil {
+		h.Host.OS, h.Host.Kernel = reportedText(h.Host.OS), reportedText(h.Host.Kernel)
+	}
 }
 
 // EgressPolicy is the host's `[kandev] allow_extra`: "*", hostname patterns
@@ -178,6 +225,7 @@ func (c *Client) Health(ctx context.Context, h hosts.Host) (Health, error) {
 	if err := c.call(ctx, h, []string{"health"}, nil, &out); err != nil {
 		return Health{}, err
 	}
+	out.clean()
 	if out.Protocol != ProtocolVersion {
 		return out, &Error{Code: CodeUnsupported, Reason: ReasonProtocol}
 	}

@@ -50,6 +50,15 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
   bounded by msbctl's real limit, its 64 KiB provision header: a sandbox's
   egress list gets 32 KiB of it, and a provision that would not fit fails
   with `invalid_config` (`requestTooLarge`) before anything is created.
+- Host status: `hosts.list` shows each host's last check (`checked_at`,
+  `ok`, `problem`, `hint`, the health report) without contacting any host.
+  Test and the maintainer, which now checks every host every 15 minutes,
+  record it. Hosts with msbctl feature request F22 also report `host`: OS,
+  kernel, CPUs, memory, load, disk and uptime.
+- `setup.status`: the Kandev server's one-time setup, with what to do for
+  each item that is not ready: the root is trusted, Kandev's API URL is set
+  and passes Kandev's own rules (read from Kandev's environment, or from the
+  last launch), and at least one host passes.
 - Profile field `workspace_gib` (default 20): each sandbox gets a disk of its
   own at `/workspace`, where Kandev starts the agent. Hosts must list
   `workspace_disk` in `health.features` (msbctl feature request F20); Test

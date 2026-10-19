@@ -9,13 +9,13 @@ import (
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
-// Maintenance cadence. Host certificates last 90 days and are renewed 30
-// days out, so a 6 h pass leaves a wide margin for hosts that are down for a
-// while; the first pass runs soon after start so a fresh install heals
-// without waiting.
+// Maintenance cadence. A pass is one health call per host, so it runs often
+// enough for the host list's status to be recent; certificate care inside
+// it only acts when a certificate is 30 days from expiry. The first pass
+// runs soon after start so a fresh install heals without waiting.
 const (
 	maintainFirst = time.Minute
-	maintainEvery = 6 * time.Hour
+	maintainEvery = 15 * time.Minute
 	// maintainHostTimeout bounds one host's health check plus install.
 	maintainHostTimeout = 45 * time.Second
 )
@@ -66,19 +66,16 @@ func (r *Runtime) stopMaintainer() {
 }
 
 // maintainHosts is one pass: every registered host, draining ones included
-// (they still serve their sessions), gets a valid certificate if it runs the
-// proxy. An unreachable host is skipped and retried next pass. It returns
-// what happened per host, for tests and logs.
+// (they still serve their sessions), is checked as Test does, which gives a
+// proxy host a valid certificate, and its status is kept for hosts.list. An
+// unreachable host is retried next pass. It returns what certificate care
+// did per host, for tests and logs.
 func (r *Runtime) maintainHosts(ctx context.Context) map[string]tlsOutcome {
-	if _, err := r.root(ctx); err != nil {
-		if !errors.Is(err, errNoRoot) && !errors.Is(err, ErrNoHost) {
-			log.Printf("maintain: %v", err)
-		}
-		return nil
-	}
 	registry, err := r.loadRegistry(ctx)
 	if err != nil {
-		log.Printf("maintain: %v", err)
+		if !errors.Is(err, ErrNoHost) {
+			log.Printf("maintain: %v", err)
+		}
 		return nil
 	}
 	client, err := r.client(ctx)
@@ -92,13 +89,10 @@ func (r *Runtime) maintainHosts(ctx context.Context) map[string]tlsOutcome {
 			return outcomes
 		}
 		hostCtx, cancel := context.WithTimeout(ctx, maintainHostTimeout)
-		health, err := client.Health(hostCtx, h)
-		if err != nil {
-			outcomes[h.Name] = tlsOutcome{State: tlsFailed, Reason: "unreachable"}
-		} else {
-			outcomes[h.Name] = r.healTLS(hostCtx, client, h, health)
-		}
+		result := r.checkHost(hostCtx, client, h)
 		cancel()
+		outcomes[h.Name] = result.outcome
+		r.recordStatus(ctx, h.Name, result)
 	}
 	return outcomes
 }

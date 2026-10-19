@@ -295,8 +295,12 @@ func TestMaintainerLeavesNonProxyHostsAndNoRootAlone(t *testing.T) {
 	f := newCAFixture(t)
 	p := newProxyHost()
 	server, _ := f.addProxyHost(t, "sbx-01", p)
-	assert.Nil(t, f.r.maintainHosts(t.Context()), "no root: nothing to do, no host contacted")
-	assert.Empty(t, server.Execs())
+	// Without a root the host is still checked, for its status, but
+	// nothing is installed.
+	assert.Equal(t, tlsNoRoot, f.r.maintainHosts(t.Context())["sbx-01"].State)
+	for _, exec := range server.Execs() {
+		assert.Equal(t, "msbctl kandev health", exec.Command, "health only")
+	}
 
 	f.createRoot(t)
 	p.mu.Lock()

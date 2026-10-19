@@ -75,6 +75,10 @@ actions:
     scope: "workspace"
     access: "admin"
     max_body_bytes: 4096
+  - key: "setup.status"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
   - key: "egress.list"
     scope: "workspace"
     access: "admin"

@@ -1017,6 +1017,85 @@ and refuses `192.168.2.6:8789`; `["192.168.2.0/24"]` admits any port on
 `192.168.2.6`; `["pypi.org"]` still refuses `192.168.2.6:8788`; a /4 is a
 config error; `health.egress.allow_extra` equals the loaded list.
 
+## Request 5: hosts the plugin sets up and shows (2026-10-19)
+
+The goal: an operator creates a KVM-capable machine (an EC2 `.metal`
+instance, say), gives the plugin an admin SSH login once, and the plugin does
+the rest and shows each host's state. The plugin can already install
+msb-manager through `get.sh` and run `host kandev install` and
+`host authorize` over that login. Three things it cannot do well without
+msbctl, and one it cannot show.
+
+### F22: `health` reports host facts
+
+`health.host`, an object, for the operator's host list. None is secret, and
+the plugin never places on it (placement keeps reading `capacity`):
+
+```json
+"host": {
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "kernel": "6.12.48-1-amd64",
+  "cpus": 16,
+  "memory_total_mib": 64000,
+  "memory_available_mib": 51000,
+  "load_1m": 0.42,
+  "disk_total_gib": 900.5,
+  "disk_free_gib": 512.25,
+  "uptime_seconds": 86400
+}
+```
+
+- `os` is `/etc/os-release` `PRETTY_NAME`; `kernel` is `uname -r`.
+- `cpus` and the memory figures are the machine's (`os.cpu_count()`,
+  `/proc/meminfo` `MemTotal` and `MemAvailable`), not the `[kandev]` limits.
+- `disk_*` are for the filesystem holding sandboxes and their workspace disks
+  (`shutil.disk_usage` on msb's data directory).
+- Any field may be absent when it cannot be read; the plugin shows what is
+  there. The plugin cuts strings to 120 printable characters.
+
+**Accept:** `health.host` is present with those fields on Linux; a missing
+`/etc/os-release` leaves only `os` out.
+
+### F23: `host kandev configure`
+
+Writes the `[kandev]` section non-interactively, keeping the rest of
+`config.toml` and its comments, validated by the same `kandev_settings()` as
+at load, so a bad value is refused before it is written:
+
+```sh
+msbctl host kandev configure --enabled --serve proxy \
+  --proxy-listen 10.0.1.23 --base-url https://sbx-01.example.com \
+  [--allow-extra '*'] [--allow-extra 192.168.2.6:8788 ...] [--json]
+```
+
+- Only the keys given change; it is idempotent, and `--json` reports the
+  effective section.
+- Today the plugin can append a `[kandev]` section to a config that has
+  none, but it cannot safely change one that exists: Python's `tomllib`
+  only reads, and a hand-rolled edit of TOML from a shell is exactly the
+  fragile thing to avoid. So until F23, re-running the plugin's bootstrap on
+  a configured host reports drift and the lines to change rather than fixing
+  it.
+- `--allow-extra '*'` is the setup-time answer to "this Kandev decides
+  egress" (the earlier idea of `host authorize --egress=plugin`): trusting
+  the key and trusting its egress stay separate decisions, but both can be
+  made in one bootstrap.
+
+**Accept:** on a config with no `[kandev]`, it adds the section; on one with
+it, it changes only the named keys; `--proxy-listen sbx-01` (a name) is
+refused and the file is unchanged.
+
+### F24: upgrades through the plugin's key
+
+`self-update` allowed under `host serve --kandev`, with the same rule as the
+everyday key (no `--version`, so no downgrade of `host serve` itself), and an
+answer in the kandev envelope: `{"msbctl_version": "0.5.2", "updated": true}`.
+Then the plugin can offer **Update** on a host without an admin login.
+Optionally `--version X` when `X` is not older than the running version.
+
+**Accept:** the kandev key runs `msbctl self-update --json` and gets the new
+version back; `msbctl self-update --version 0.4.0` from it is refused.
+
 ## Open questions
 
 1. **agentctl after a VM restart.** Does a restarted agentctl need a fresh

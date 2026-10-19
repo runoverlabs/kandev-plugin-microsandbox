@@ -77,7 +77,8 @@ func stateOf(d *pluginsdk.ExecutorResourceDescriptor) (resourceState, error) {
 }
 
 // bootstrap is Kandev's bootstrap_json. It is transient: never logged,
-// stored, checkpointed or put in argv.
+// stored, checkpointed or put in argv. The one exception is api_url,
+// Kandev's public address, which the readiness view keeps.
 type bootstrap struct {
 	Nonce       string `json:"nonce"`
 	RuntimePort int    `json:"runtime_port"`
@@ -176,6 +177,7 @@ func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *plugins
 		log.Printf("provision %s: %v", rc.GetEnvironmentId(), err)
 		return fail(providerError(msbctl.CodeInvalidConfig, "bootstrapInvalid"))
 	}
+	r.noteAPIURL(ctx, boot.APIURL)
 	callbacks, err := r.providerHost()
 	if err != nil {
 		return fail(providerError(msbctl.CodeUnavailable, "hostUnavailable"))

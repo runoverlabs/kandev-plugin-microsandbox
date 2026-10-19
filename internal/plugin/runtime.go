@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -47,6 +48,13 @@ type Runtime struct {
 	publicKey string
 	pool      *sshx.Pool
 
+	// statusMu serializes writes of the host status cache and of the API
+	// URL last seen, which seenAPIURL caches.
+	statusMu   sync.Mutex
+	seenAPIURL string
+	// getenv reads the plugin process's environment, which is Kandev's.
+	getenv func(string) string
+
 	caMu sync.Mutex
 	ca   *pki.Root
 	// trustPool is the root pool trust checks use; nil means the system
@@ -70,7 +78,7 @@ var (
 
 // NewRuntime returns a Runtime dialing hosts over the network.
 func NewRuntime() *Runtime {
-	return &Runtime{dialer: &net.Dialer{}, now: time.Now, maintFirst: maintainFirst, maintEvery: maintainEvery}
+	return &Runtime{dialer: &net.Dialer{}, now: time.Now, getenv: os.Getenv, maintFirst: maintainFirst, maintEvery: maintainEvery}
 }
 
 func (r *Runtime) host() (pluginsdk.Host, error) {

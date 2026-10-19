@@ -103,6 +103,7 @@ func newRuntime(t *testing.T, host pluginsdk.Host) *Runtime {
 	t.Helper()
 	r := NewRuntime()
 	r.maintEvery = 0 // tests drive maintainHosts directly
+	r.getenv = func(string) string { return "" }
 	if host != nil {
 		r.SetHost(host)
 	}
