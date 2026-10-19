@@ -179,9 +179,10 @@ expansion.
 host's `[kandev] allow_extra` and refuses the whole provision over one it does
 not admit. Its default, `[]`, admits nothing extra; for central control from
 this plugin, set `allow_extra = ["*"]` on hosts that trust this Kandev server.
-Today `allow_extra` matches hostnames only, so an address entry needs `"*"`
-(msbctl feature request F21 adds addresses). Once a host reports its
-`allow_extra`, Test checks the default groups against it and reports
+To keep a bound instead, list what may be added: hostname patterns (any
+port), addresses (any port), `address:port` (that port) and CIDRs up to /8
+(IPv4) or /32 (IPv6), from msb-manager 0.5.1. A 0.5.1 host reports its
+`allow_extra`, and Test checks the default groups against it and reports
 `egress_refused` with the entries it would refuse.
 
 ## Executor profile

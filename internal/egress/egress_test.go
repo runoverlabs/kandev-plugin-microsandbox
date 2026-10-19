@@ -127,4 +127,9 @@ func TestRefusedMirrorsAllowExtra(t *testing.T) {
 	assert.Equal(t, []string{"api.openai.com", "pypi.org:8443", "x.models.dev"},
 		Refused(entries, []string{"192.168.2.0/24", "fd00::/8"}))
 	assert.Empty(t, Refused([]string{"192.168.2.6"}, []string{"192.168.2.6:443"}), "no port means HTTPS")
+	assert.Empty(t, Refused([]string{"[fd00::5]:8080"}, []string{"fd00::5"}), "msbctl takes a bare IPv6 address")
+	assert.Empty(t, Refused([]string{"[fd00::5]:8080"}, []string{"[fd00::5]"}))
+	assert.Equal(t, []string{"192.168.2.6:8788"}, Refused([]string{"192.168.2.6:8788"}, []string{"192.168.2.6:8789"}))
+	assert.Equal(t, []string{"192.168.2.6"}, Refused([]string{"192.168.2.6"}, []string{"*.168.2.6", "192.168.2.6.example.com"}),
+		"a hostname pattern never covers an address")
 }

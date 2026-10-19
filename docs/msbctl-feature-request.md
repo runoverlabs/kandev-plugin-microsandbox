@@ -9,7 +9,7 @@
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Fourth request, 2026-10-19:** [F21](#f21-allow_extra-admits-addresses-and-health-reports-it), central egress from the plugin.
+**Fourth request, 2026-10-19:** [F21](#f21-allow_extra-admits-addresses-and-health-reports-it), central egress from the plugin. Released in 0.5.1.
 **Third request, 2026-10-19:** [F20](#f20-a-workspace-disk-at-workspace), from the first real run. Released in 0.5.0.
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
@@ -1006,6 +1006,11 @@ which msbctl already accepts, including address targets such as
   own policy.
 - No change to provision itself: `egress_allow` keeps its shape and its
   checks.
+
+**Built** and released in msb-manager
+[0.5.1](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.5.1)
+(`fbb1bcc`, `a3c6a98`). As requested; it also takes a bare IPv6 address
+(`fd00::1`), which the plugin's Test now understands too.
 
 **Accept:** `allow_extra = ["192.168.2.6:8788"]` admits `192.168.2.6:8788`
 and refuses `192.168.2.6:8789`; `["192.168.2.0/24"]` admits any port on

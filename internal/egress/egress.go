@@ -323,8 +323,9 @@ func (p Policy) Expand(groups, extra []string) ([]string, error) {
 
 // Refused returns the entries a host's allow_extra would refuse. allowExtra
 // uses msbctl's patterns: "*", a hostname, "*.suffix", an address, an
-// address:port, or a CIDR (feature request F21). A hostname pattern covers a
-// name on any port, as msbctl matches on the host part alone.
+// address:port, or a CIDR (msb-manager 0.5.1, feature request F21). A
+// hostname pattern covers a name on any port and never an address; an address
+// or CIDR covers an address on any port; an address:port that port only.
 func Refused(entries, allowExtra []string) []string {
 	var out []string
 	for _, e := range entries {
@@ -359,6 +360,10 @@ func covered(entry string, patterns []string) bool {
 func addressCovered(addr netip.Addr, port int, pattern string) bool {
 	if prefix, err := netip.ParsePrefix(pattern); err == nil {
 		return prefix.Contains(addr)
+	}
+	// msbctl also takes a bare IPv6 address, without brackets, on any port.
+	if pAddr, err := netip.ParseAddr(strings.Trim(pattern, "[]")); err == nil {
+		return pAddr == addr
 	}
 	pHost, pPort, err := splitHostPort(pattern)
 	if err != nil {
