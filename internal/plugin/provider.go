@@ -204,6 +204,9 @@ func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *plugins
 	rec, err := client.Provision(ctx, host, rc.GetEnvironmentId(), provisionRequest(spec, rc, api, r.now()))
 	if err != nil {
 		log.Printf("provision %s on %s: %v", rc.GetEnvironmentId(), host.Name, err)
+		if errors.Is(err, msbctl.ErrTooLarge) {
+			return fail(providerError(msbctl.CodeInvalidConfig, "requestTooLarge"))
+		}
 		return fail(providerFailure(err, "provisionFailed"))
 	}
 	resource := descriptorFor(host.Name, rec)

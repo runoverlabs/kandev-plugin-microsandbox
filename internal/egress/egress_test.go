@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -93,19 +94,27 @@ func TestExpandOrdersAndDeduplicates(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnknown)
 }
 
-func TestExpandIsBounded(t *testing.T) {
-	var groups []Group
-	var names []string
-	for i := range 3 {
-		var entries []string
-		for j := range MaxGroupEntries {
-			entries = append(entries, "h"+string(rune('a'+i))+strings.Repeat("x", j)+".example.com")
+func TestExpandIsBoundedByTheHeaderBudget(t *testing.T) {
+	entries := func(prefix string, n int) []string {
+		var out []string
+		for j := range n {
+			out = append(out, prefix+strconv.Itoa(j)+".example.com")
 		}
-		name := "g" + string(rune('a'+i))
-		groups = append(groups, Group{Name: name, Entries: entries})
-		names = append(names, name)
+		return out
 	}
-	_, err := Policy{Version: PolicyVersion, Groups: groups}.Expand(names, nil)
+	// Each entry is about 20 bytes encoded: 1000 fit in a group, two such
+	// groups do not fit in one sandbox's list.
+	a, b := Group{Name: "ga", Entries: entries("a", 1000)}, Group{Name: "gb", Entries: entries("b", 1000)}
+	p := Policy{Version: PolicyVersion, Groups: []Group{a, b}}
+	require.NoError(t, p.Check(), "far more than the old 32 entries is fine")
+	_, err := p.Expand([]string{"ga"}, nil)
+	require.NoError(t, err)
+	_, err = p.Expand([]string{"ga", "gb"}, nil)
+	assert.ErrorIs(t, err, ErrPolicy)
+
+	assert.ErrorIs(t, Policy{Version: PolicyVersion, Groups: []Group{a, b}, Defaults: []string{"ga", "gb"}}.Check(), ErrPolicy,
+		"defaults every sandbox gets must fit on their own")
+	_, err = CheckGroup(Group{Name: "huge", Entries: entries("c", 2000)})
 	assert.ErrorIs(t, err, ErrPolicy)
 }
 

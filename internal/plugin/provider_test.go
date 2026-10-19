@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,4 +403,17 @@ func TestProvisionStopsWhenTheCheckpointIsRefused(t *testing.T) {
 	assert.Equal(t, "unavailable", res.Error.Code)
 	assert.Empty(t, f.api.platforms, "the artifact is not read")
 	assert.Nil(t, f.hosts["sbx-01"].sandbox("env-1").binary, "agentctl is not installed")
+}
+
+// msbctl refuses a stdin header over 64 KiB, so the plugin refuses it first,
+// before creating anything, with a code the operator can act on.
+func TestProvisionRefusesARequestLargerThanTheHeader(t *testing.T) {
+	f := newProviderFixture(t, "sbx-01")
+	snap := fullProfile()
+	snap.SecretValues["extra_secret_1_value"] = strings.Repeat("s", msbctl.MaxHeaderBytes)
+	res := f.provision(t, "env-1", "op-1", snap)
+	require.NotNil(t, res.Error)
+	assert.Equal(t, "invalid_config", res.Error.Code)
+	assert.Equal(t, "provider.microsandbox.requestTooLarge", res.Error.MessageId)
+	assert.Empty(t, f.hosts["sbx-01"].provReqs, "nothing is sent")
 }

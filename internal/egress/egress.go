@@ -18,6 +18,7 @@
 package egress
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -27,12 +28,15 @@ import (
 	"strings"
 )
 
-// Limits. MaxEntries bounds what one sandbox gets after expansion, so a
-// provision header stays small and msb's rule list stays readable.
+// Limits, in bytes as sent. msbctl reads a provision request as one JSON
+// line of at most 64 KiB and refuses all of it beyond that, so a sandbox's
+// egress list gets half (MaxListBytes) and image, env and secrets keep the
+// rest; the plugin checks the whole line before sending. MaxPolicyBytes keeps
+// egress.list, which returns every group, far below Kandev's 1 MiB limit on
+// an action response.
 const (
-	MaxEntries       = 64
-	MaxGroups        = 32
-	MaxGroupEntries  = 32
+	MaxListBytes     = 32 << 10
+	MaxPolicyBytes   = 256 << 10
 	MaxDescription   = 200
 	PolicyVersion    = 1
 	maxNameLength    = 40
@@ -253,8 +257,8 @@ func CheckGroup(g Group) (Group, error) {
 	if len(g.Description) > MaxDescription {
 		return Group{}, fmt.Errorf("%w: the description is at most %d characters", ErrPolicy, MaxDescription)
 	}
-	if len(g.Entries) == 0 || len(g.Entries) > MaxGroupEntries {
-		return Group{}, fmt.Errorf("%w: a group has 1 to %d entries", ErrPolicy, MaxGroupEntries)
+	if len(g.Entries) == 0 {
+		return Group{}, fmt.Errorf("%w: a group has at least one entry", ErrPolicy)
 	}
 	var entries []string
 	for _, raw := range g.Entries {
@@ -266,7 +270,22 @@ func CheckGroup(g Group) (Group, error) {
 			entries = append(entries, entry)
 		}
 	}
+	if err := CheckList(entries); err != nil {
+		return Group{}, err
+	}
 	return Group{Name: g.Name, Description: strings.TrimSpace(g.Description), Entries: entries}, nil
+}
+
+// CheckList refuses a list of entries larger than MaxListBytes as encoded.
+func CheckList(entries []string) error {
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	if len(encoded) > MaxListBytes {
+		return fmt.Errorf("%w: %d bytes of entries as sent to the host, at most %d", ErrPolicy, len(encoded), MaxListBytes)
+	}
+	return nil
 }
 
 // Check validates a whole policy, as loaded from state.
@@ -274,8 +293,8 @@ func (p Policy) Check() error {
 	if p.Version != PolicyVersion {
 		return fmt.Errorf("%w: version %d", ErrPolicy, p.Version)
 	}
-	if len(p.Groups) > MaxGroups {
-		return fmt.Errorf("%w: at most %d groups", ErrPolicy, MaxGroups)
+	if encoded, err := json.Marshal(p); err != nil || len(encoded) > MaxPolicyBytes {
+		return fmt.Errorf("%w: the policy is larger than %d bytes", ErrPolicy, MaxPolicyBytes)
 	}
 	seen := map[string]bool{}
 	for _, g := range p.Groups {
@@ -292,12 +311,14 @@ func (p Policy) Check() error {
 			return fmt.Errorf("%w: default %q", ErrUnknown, name)
 		}
 	}
-	return nil
+	// Every sandbox gets the defaults, so they must fit on their own.
+	_, err := p.Expand(nil, nil)
+	return err
 }
 
 // Expand returns the entries a sandbox gets: the defaults' groups, then the
 // named groups, then extra, deduplicated in that order. An unknown group name
-// is ErrUnknown; more than MaxEntries is ErrPolicy.
+// is ErrUnknown; a list larger than MaxListBytes is ErrPolicy.
 func (p Policy) Expand(groups, extra []string) ([]string, error) {
 	var out []string
 	add := func(entries []string) {
@@ -315,8 +336,8 @@ func (p Policy) Expand(groups, extra []string) ([]string, error) {
 		add(g.Entries)
 	}
 	add(extra)
-	if len(out) > MaxEntries {
-		return nil, fmt.Errorf("%w: %d entries after expansion, at most %d", ErrPolicy, len(out), MaxEntries)
+	if err := CheckList(out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

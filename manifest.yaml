@@ -82,7 +82,7 @@ actions:
   - key: "egress.put"
     scope: "workspace"
     access: "admin"
-    max_body_bytes: 16384
+    max_body_bytes: 40960
   - key: "egress.remove"
     scope: "workspace"
     access: "admin"

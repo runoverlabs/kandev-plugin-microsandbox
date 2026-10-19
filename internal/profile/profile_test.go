@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -145,6 +146,17 @@ func TestParseEgressAllow(t *testing.T) {
 		_, errs := Parse(with(validConfig(), FieldEgressAllow, bad), nil)
 		assert.Equal(t, []FieldError{{FieldEgressAllow, CodeInvalid}}, errs, bad)
 	}
+}
+
+func TestEgressAllowFitsTheListBudget(t *testing.T) {
+	var entries []string
+	for i := range 2000 {
+		entries = append(entries, fmt.Sprintf("h%d.example.com", i))
+	}
+	_, errs := Parse(with(validConfig(), FieldEgressAllow, strings.Join(entries, ",")), nil)
+	assert.Equal(t, []FieldError{{FieldEgressAllow, CodeInvalid}}, errs)
+	_, errs = Parse(with(validConfig(), FieldEgressAllow, strings.Join(entries[:100], ",")), nil)
+	assert.Empty(t, errs, "well past the old 32 entries")
 }
 
 func TestParseEgressGroups(t *testing.T) {

@@ -153,9 +153,6 @@ func (r *Runtime) actionEgressPut(ctx context.Context, body []byte) response {
 	policy, err := r.mutateEgress(ctx, func(p egress.Policy) (egress.Policy, error) {
 		i := slices.IndexFunc(p.Groups, func(g egress.Group) bool { return g.Name == group.Name })
 		if i < 0 {
-			if len(p.Groups) >= egress.MaxGroups {
-				return p, fmt.Errorf("%w: at most %d groups", egress.ErrPolicy, egress.MaxGroups)
-			}
 			created = true
 			p.Groups = append(p.Groups, group)
 		} else {

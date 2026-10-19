@@ -225,7 +225,7 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 		}
 	}
 
-	if entries, err := egress.ParseList(value(config, FieldEgressAllow)); err == nil && len(entries) <= egress.MaxGroupEntries {
+	if entries, err := egress.ParseList(value(config, FieldEgressAllow)); err == nil && egress.CheckList(entries) == nil {
 		spec.EgressAllow = entries
 	} else {
 		add(FieldEgressAllow, CodeInvalid)
@@ -468,5 +468,5 @@ func parseNames(raw string) ([]string, bool) {
 			out = append(out, name)
 		}
 	}
-	return out, len(out) <= egress.MaxGroups
+	return out, true
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 
@@ -103,10 +104,21 @@ type Lease struct {
 	Headers    map[string]string `json:"headers,omitempty"`
 }
 
+// MaxHeaderBytes is msbctl's limit on the stdin header line, newline
+// included. msbctl refuses a longer one whole, so it is checked before
+// anything is sent.
+const MaxHeaderBytes = 64 << 10
+
+// ErrTooLarge is a request whose header would exceed MaxHeaderBytes.
+var ErrTooLarge = errors.New("the request is larger than msbctl's 64 KiB header")
+
 func header(v any) (io.Reader, error) {
 	line, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
+	}
+	if len(line)+1 > MaxHeaderBytes {
+		return nil, ErrTooLarge
 	}
 	return bytes.NewReader(append(line, '\n')), nil
 }

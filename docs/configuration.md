@@ -172,8 +172,14 @@ always denied by the host, but a LAN service on another port works by address.
 | `egress.remove` | `{"name": "lan-llm"}` | Deletes a custom group and drops it from the defaults. A profile still naming it fails validation, and a launch from it fails with `invalid_config`. |
 | `egress.defaults` | `{"groups": ["lan-llm", "opencode"]}` | Sets the groups every sandbox gets. |
 
-At most 32 custom groups of 32 entries each, and 64 entries per sandbox after
-expansion.
+There is no count limit. The real one is msbctl's: it reads a provision as
+one JSON line of at most 64 KiB and refuses all of it beyond that. So a
+sandbox's egress list (defaults, then the profile's groups, then its
+`egress_allow`) gets 32 KiB of that as sent, about 1,500 typical hostnames,
+and image, environment and secrets keep the rest. A group, and the defaults
+on their own, must fit in it, which `egress.put` and `egress.defaults` check
+when you save. A launch whose whole request would still exceed 64 KiB fails
+with `invalid_config` (`requestTooLarge`) and creates nothing.
 
 **The host keeps the last word.** msbctl checks every entry against the
 host's `[kandev] allow_extra` and refuses the whole provision over one it does
@@ -201,7 +207,7 @@ saved.
 | `workspace_gib` | no | 1–500, default 20. A disk of its own at `/workspace`, where Kandev starts the agent; removed with the sandbox |
 | `max_lifetime_hours` | yes | 1–168. The sandbox is destroyed at this age |
 | `retain_hours` | no | 0–168, default 24 |
-| `egress_allow` | no | Comma-separated egress entries this profile adds (grammar under [Egress](#egress)), at most 32 |
+| `egress_allow` | no | Comma-separated egress entries this profile adds (grammar under [Egress](#egress)), within the 32 KiB egress budget |
 | `egress_groups` | no | Comma-separated egress group names this profile adds to the defaults, such as `openrouter` or one of your own. Each must exist in the plugin's egress policy |
 | `env` | no | `KEY=VALUE;KEY2=VALUE2`, non-secret values only. Names are uppercase `A-Z`, `0-9`, `_`, at most 64 characters |
 | `registry_username` / `registry_password` | no | Both or neither. A private image must name its registry host (`ghcr.io/…`, `registry.example.com:5000/…`) |
