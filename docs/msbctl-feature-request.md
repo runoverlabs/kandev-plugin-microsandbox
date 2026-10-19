@@ -9,6 +9,7 @@
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
+**Third request, 2026-10-19:** [F20](#f20-provision-creates-workspace), from the first real run.
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
@@ -908,6 +909,33 @@ is refused.
 **Accept:** each state has a test: no certificate, an expired one, the
 proxy not running, `proxy_listen` unset, and `tailscale` mode with empty
 `CertDomains`.
+
+## Request 3: from the first real run (2026-10-19)
+
+Kandev 0.97.0 and the plugin against msb-manager 0.4.0 on a real host
+(`serve = "proxy"`) ran a whole agent session: provision, agentctl, the
+lease through the proxy, agent turns streamed back, inspect, and expiry by
+the reaper. One gap is on msbctl's side.
+
+### F20: `provision` creates `/workspace`
+
+Kandev creates every session's agentctl instance at **`/workspace`**
+(`pluginExecutorWorkspacePath`, fixed, in
+`apps/backend/internal/agent/runtime/lifecycle/executor_plugin.go`) and
+starts the agent there. Nothing creates it: Kandev does not, agentctl does
+not, and only a task with a repository gets a checkout under it. With a
+stock image (`debian:13-slim`), the agent fails with `fork/exec <agent>: no
+such file or directory`, which is Go's report of a missing working directory.
+
+- After the VM is up and before `provision` returns, run
+  `mkdir -p /workspace` in the guest, owned by the user agentctl runs as
+  (root today).
+- Do it again on `start`, as for the `/etc/hosts` pin: harmless when it
+  exists, and it covers images that put `/workspace` on a fresh volume.
+- Images that already have it are unaffected.
+
+**Accept:** `provision` on an image without `/workspace` leaves an empty,
+writable `/workspace`; an existing one keeps its contents and owner.
 
 ## Open questions
 

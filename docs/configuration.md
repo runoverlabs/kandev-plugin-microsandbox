@@ -96,6 +96,28 @@ background pass every 6 hours and on every **Test**. A host whose
 | `tls_install_failed` | The host did not accept a new certificate. It is retried automatically. |
 | `root_not_trusted` | The Kandev server does not trust the plugin's root yet. Install it (`ca.get`) and restart Kandev. |
 
+### What Kandev and the network need
+
+Found on the first real run (Kandev 0.97.0, msb-manager 0.4.0):
+
+- **Kandev's API URL must be `https` and must not be a private address.**
+  Kandev refuses to launch on any plugin executor unless
+  `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` is set to an `https` URL
+  whose host is not `localhost`, a loopback, link-local or private IP literal
+  (so `https://192.168.1.5` is refused). A DNS name passes. Every sandbox
+  host must be able to resolve that name: msbctl resolves it on the host,
+  pins the sandbox's egress to that address, and writes it into the guest's
+  `/etc/hosts`. Agents call back to Kandev through it.
+- **The Kandev server must reach each host's proxy ports**, `proxy_listen`
+  on `proxy_port_pool` (default 30000–39999), with four ports per sandbox. On
+  a host with a firewall (firewalld on Fedora allows only `ssh`), open that
+  range to the Kandev server's address only.
+- **The image needs `/workspace`** until msbctl creates it (feature request
+  F20): Kandev starts every agent there.
+- **Terminal-passthrough agents and the task's shell terminal do not run in
+  the sandbox** in Kandev 0.97.0: Kandev starts them on the Kandev server
+  instead. Use agents that speak ACP.
+
 The plugin has **one SSH key** for every host. It is generated on first use,
 kept in the plugin's secret store, and only its public half is ever shown.
 

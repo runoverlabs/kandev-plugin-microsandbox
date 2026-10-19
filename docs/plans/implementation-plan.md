@@ -610,13 +610,20 @@ The biggest risks are the `tailscale serve` data path (is no daemon actually eno
 - [x] ~~Does kandev's endpoint transport support a private CA?~~ Only through the Kandev server's system trust store; hence the name-constrained root.
 - [ ] Where base images are built and pushed (CI per project vs a shared builder), and registry auth on the hosts.
 
+Found on the first real run (Oct 19, Kandev 0.97.0, msb-manager 0.4.0 on a real host). These are Kandev gaps to report upstream, not plugin bugs:
+
+- [ ] **Passthrough agents and user shells run on the Kandev server.** `Manager.GetInteractiveRunner` always returns the standalone runner, and `ShouldUseContainerShell` needs `is_remote` metadata, which `PluginRemoteExecutor` never sets (SSH, Docker and Kubernetes executions do). So a terminal-passthrough agent, or the task's shell terminal, starts a local PTY in `/workspace` on the Kandev server.
+- [ ] **Deleting a task leaks the sandbox.** The environment row goes before the cleanup job stops the runtime, so `ExecutorProviderProfileForRecovery` fails with "recorded environment ownership changed", the job retries forever, and `DestroyExecutorEnvironment` is never called. The sandbox's expiry and the host's reaper are what removed it, so keep `max_lifetime_hours` short.
+- [ ] **Launch failures are opaque.** The launch gate logs only the stage and the cause's Go type, and the plugin's stderr does not reach Kandev's log at info level.
+- [ ] **A failed session cannot be reattached.** agentctl's token lives only in the live execution (`TransientAuthToken`), so after a failed launch nothing can open a terminal in the still-running sandbox.
+
 * Risk: the plugin SDK is pre-1.0 and consumed through a source `replace`; pin `.kandev-sdk-ref` and re-run contract tests on every kandev upgrade.
 * Risk: one VM per session multiplies resident memory; size hosts for peak concurrent sessions, not tasks.
 * Risk: msb releases change behaviour between patch versions. `msbctl remote setup` installs the laptop's msb version on each host; keep every kandev host on the same version and re-run the Phase 0 spikes on each msb upgrade.
 
 ## Base image
 
-Kandev creates the session's agentctl instance with its workspace at **`/workspace`** (`pluginExecutorWorkspacePath`, `lifecycle/executor_plugin.go`), so the image must let the agent user create and write `/workspace`.
+Kandev creates the session's agentctl instance with its workspace at **`/workspace`** (`pluginExecutorWorkspacePath`, `lifecycle/executor_plugin.go`) and starts the agent there, but nothing creates the directory: the first real run failed on a stock image with `fork/exec …: no such file or directory`. msbctl is asked to create it at provision (feature request F20); until then the image must contain it.
 
 The image is complete: kandev VMs run no msbctl bootstrap. It holds git, gh, the agent CLIs a project uses, the language toolchains, `socat` (for the port fallback), and a non-root user. Pin it by digest. msb boots a host directory given as the image, so only OCI references are accepted **[exists: `image_problem()`]**. The msb-manager bootstrap (`bootstrap.sh`) is a usable reference for what to install and from where, since it is written to work under deny-by-default egress (apt over HTTPS, pinned release downloads with checksums).
 

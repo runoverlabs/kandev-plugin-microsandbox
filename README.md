@@ -13,8 +13,10 @@ install, driven over SSH through a restricted forced command
 
 > **Status: early development.** The host registry, profile validation,
 > placement, the provider's whole lifecycle (provision, connect, inspect,
-> recover, attach, destroy) and the root certificate are built and tested
-> against fakes, but not yet against a real host or Kandev. See the [implementation plan](docs/plans/implementation-plan.md)
+> recover, attach, destroy) and the root certificate are built. A whole agent
+> session has run against Kandev 0.97.0 and a real msb-manager 0.4.0 host;
+> the known gaps, mostly on Kandev's side, are listed in
+> [configuration](docs/configuration.md#what-kandev-and-the-network-need). See the [implementation plan](docs/plans/implementation-plan.md)
 > for the phases, the [host protocol](docs/host-protocol.md) for what a
 > sandbox host must answer, and the [msbctl feature request](docs/msbctl-feature-request.md)
 > for how the host side was built.

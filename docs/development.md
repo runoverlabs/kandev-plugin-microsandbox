@@ -66,8 +66,33 @@ Use a disposable Kandev instance, never a primary one:
 3. Kandev probes the provider contract at activation; the provider must show
    as available under the executor settings.
 4. Register a host through the actions in [configuration.md](configuration.md)
-   and create a profile. Launching a task on it fails with `unsupported`
-   until provisioning is built.
+   and create a profile, then launch a task on it. Read "What Kandev and the
+   network need" there first: Kandev's API URL and the proxy ports are the
+   usual blockers.
+
+### When a launch fails
+
+Kandev logs only the stage that failed, such as
+`plugin executor launch gate failed {"stage": "control_handshake"}`, and the
+session says "plugin executor launch failed; allocated resource was removed".
+It keeps neither the cause nor the plugin's log lines. Narrow it down on the
+host:
+
+- `journalctl --user -u msb-kandev-proxy`: one line per connection
+  (`forwarded`, `unauthorized`). No line means Kandev's connection never
+  arrived, which is a network or firewall problem.
+- `msb exec <sandbox> -- cat /var/log/agentctl.log` while the sandbox
+  exists: agentctl's own log, including the instance Kandev created.
+- To test the data path without Kandev, provision by hand with
+  `msbctl kandev provision`, take `msbctl kandev lease ENV 8765`, and call
+  `https://<base_url host>:<port>/health` with
+  `curl --cacert <root> -H 'X-Msb-Lease: <token>'`. Expect 401 without the
+  header. Keep the token out of logs and shell history, and purge the
+  sandbox afterwards.
+
+Credential-free agents: Kandev's `mock-agent` (start Kandev with
+`KANDEV_MOCK_AGENT=true`, and put a linux build of `cmd/mock-agent` on the
+image's `PATH`) runs a whole session without any agent credentials.
 
 Bump `version` in `manifest.yaml` before reinstalling: Kandev refuses to
 install an id and version it already has.
