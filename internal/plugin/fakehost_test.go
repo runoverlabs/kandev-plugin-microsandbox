@@ -86,6 +86,7 @@ func (f *fakeMsbctl) handle(command string, stdin []byte) sshtest.Reply {
 			"capacity": map[string]any{"max_sandboxes": max, "sandboxes": used, "max_cpus": 64, "max_memory_mib": 1 << 20},
 			"serve":    map[string]any{"ok": true, "mode": "none"},
 			"tls":      map[string]any{"installed": false},
+			"features": msbctl.RequiredFeatures,
 		})
 	case "provision":
 		return f.provision(rest[0], stdin)

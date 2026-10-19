@@ -88,7 +88,7 @@ func TestManifestProviderMatchesTheCode(t *testing.T) {
 
 	want := []string{
 		profile.FieldPlacement, profile.FieldImage, profile.FieldCPUs, profile.FieldMemoryMiB,
-		profile.FieldDiskGiB, profile.FieldMaxLifetimeHours, profile.FieldRetainHours,
+		profile.FieldDiskGiB, profile.FieldWorkspaceGiB, profile.FieldMaxLifetimeHours, profile.FieldRetainHours,
 		profile.FieldEgressAllow, profile.FieldEnv, profile.FieldRegistryUsername, profile.FieldRegistryPassword,
 	}
 	secret := map[string]bool{profile.FieldRegistryPassword: true}

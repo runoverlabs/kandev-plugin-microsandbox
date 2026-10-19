@@ -114,6 +114,7 @@ func TestProvisionHappyPath(t *testing.T) {
 	assert.Equal(t, []string{"pypi.org"}, req.EgressAllow)
 	assert.Equal(t, plantedSecret, req.Secrets[0].Value, "secrets reach the host on stdin")
 	assert.Equal(t, plantedRegPW, req.Registry.Password)
+	assert.Equal(t, 20, req.WorkspaceGiB, "every sandbox gets a /workspace disk")
 
 	sandbox := host.sandbox("env-1")
 	assert.Equal(t, plantedNonce, sandbox.nonce, "the nonce reaches agentctl's launch on stdin")

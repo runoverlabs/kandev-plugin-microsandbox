@@ -41,6 +41,10 @@ and a real host. Sandbox hosts need msb-manager 0.4.0 or newer.
     there is no resource state, and stays retryable while a host is down.
   - Placement heals a proxy host's certificate before counting it.
 - Resource state gains `env`, the Kandev environment id.
+- Profile field `workspace_gib` (default 20): each sandbox gets a disk of its
+  own at `/workspace`, where Kandev starts the agent. Hosts must list
+  `workspace_disk` in `health.features` (msbctl feature request F20); Test
+  reports others as `outdated` and placement skips them.
 - Inventory, inspect, stop and removal use msbctl's generic verbs (`ls`,
   `show`, `stop` and `purge … -y`, with `--json`), addressed by the sandbox
   name from the resource state. A lost provision reply is found by

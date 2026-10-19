@@ -9,7 +9,7 @@
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Third request, 2026-10-19:** [F20](#f20-provision-creates-workspace), from the first real run.
+**Third request, 2026-10-19:** [F20](#f20-a-workspace-disk-at-workspace), from the first real run.
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
@@ -917,7 +917,7 @@ Kandev 0.97.0 and the plugin against msb-manager 0.4.0 on a real host
 lease through the proxy, agent turns streamed back, inspect, and expiry by
 the reaper. One gap is on msbctl's side.
 
-### F20: `provision` creates `/workspace`
+### F20: a workspace disk at `/workspace`
 
 Kandev creates every session's agentctl instance at **`/workspace`**
 (`pluginExecutorWorkspacePath`, fixed, in
@@ -927,15 +927,41 @@ not, and only a task with a repository gets a checkout under it. With a
 stock image (`debian:13-slim`), the agent fails with `fork/exec <agent>: no
 such file or directory`, which is Go's report of a missing working directory.
 
-- After the VM is up and before `provision` returns, run
-  `mkdir -p /workspace` in the guest, owned by the user agentctl runs as
-  (root today).
-- Do it again on `start`, as for the `/etc/hosts` pin: harmless when it
-  exists, and it covers images that put `/workspace` on a fresh volume.
-- Images that already have it are unaffected.
+Give each Kandev sandbox **its own disk at `/workspace`**, the way repo
+sandboxes already keep their clone on `<prefix>-workspace`
+(`Sandbox.workspace_volume`, `named_disk_flags`):
 
-**Accept:** `provision` on an image without `/workspace` leaves an empty,
-writable `/workspace`; an existing one keeps its contents and owner.
+- `provision` takes **`workspace_gib`** (integer, 1–500) in the header and
+  mounts a disk volume of that size at `/workspace`
+  (`--mount-named <prefix>-workspace:/workspace:kind=disk,size=<n>G`). The
+  plugin always sends it (default 20). Refuse a missing or out-of-range
+  value with `invalid_config`; a provision without a workspace is the
+  failure this fixes.
+- `/workspace` must be writable by the user agentctl runs as (root today),
+  empty on a new sandbox.
+- **Removed with the sandbox.** `purge`, the reaper's expiry and its
+  reconcile delete the volume with the VM, under the same lock. A volume
+  named for a Kandev sandbox with no entry is an orphan, removed like an
+  unlabelled VM. Nothing of a Kandev workspace may outlive its sandbox: the
+  data is the agent's and the task's, and Kandev does not know about it.
+- `stop`/`start` keep it, as they keep the root disk.
+- **`health.features` lists `"workspace_disk"`.** `protocol` stays 1. The
+  plugin refuses a host that does not list it, because 0.4.0 ignores
+  unknown header keys: it would provision without a workspace and report
+  success. `features` is the place for later additions within protocol 1.
+- Optional: count workspace disks against a `[kandev] max_disk` limit, and
+  report `max_disk_gib`/`disk_gib` in `capacity`. The plugin does not use
+  them yet.
+
+Why a disk and not a host directory: a host mount is virtiofs, which is
+slow for git and builds and has corrupted git's index in practice; it has
+no quota, so one build can fill the host; it puts what untrusted code wrote
+on the host's own filesystem; and a host path can outlive its sandbox.
+
+**Accept:** a sandbox gets an empty, writable ext4 `/workspace` of the
+requested size; it survives `stop`/`start`; `purge`, expiry and reconcile
+leave no volume behind; a header without `workspace_gib` is
+`invalid_config`; `health.features` contains `"workspace_disk"`.
 
 ## Open questions
 

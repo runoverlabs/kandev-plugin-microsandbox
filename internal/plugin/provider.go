@@ -241,7 +241,7 @@ func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *plugins
 func provisionRequest(spec profile.Spec, rc *pluginsdk.ExecutorProviderRequestContext, api msbctl.KandevAPI, now time.Time) msbctl.ProvisionRequest {
 	out := msbctl.ProvisionRequest{
 		OperationID: rc.GetOperationId(), InputDigest: rc.GetInputDigest(),
-		Image: spec.Image, CPUs: spec.CPUs, MemoryMiB: spec.MemoryMiB, DiskGiB: spec.DiskGiB,
+		Image: spec.Image, CPUs: spec.CPUs, MemoryMiB: spec.MemoryMiB, DiskGiB: spec.DiskGiB, WorkspaceGiB: spec.WorkspaceGiB,
 		ExpiresAt:   now.UTC().Add(time.Duration(spec.MaxLifetimeHours) * time.Hour).Format(time.RFC3339),
 		KandevAPI:   api,
 		EgressAllow: spec.EgressAllow,

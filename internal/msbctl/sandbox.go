@@ -67,18 +67,21 @@ type KandevAPI struct {
 
 // ProvisionRequest is provision's stdin header. It holds secret values.
 type ProvisionRequest struct {
-	OperationID string    `json:"operation_id"`
-	InputDigest string    `json:"input_digest"`
-	Image       string    `json:"image"`
-	CPUs        int       `json:"cpus"`
-	MemoryMiB   int       `json:"memory_mib"`
-	DiskGiB     int       `json:"disk_gib"`
-	ExpiresAt   string    `json:"expires_at"`
-	KandevAPI   KandevAPI `json:"kandev_api"`
-	EgressAllow []string  `json:"egress_allow,omitempty"`
-	Env         []EnvVar  `json:"env,omitempty"`
-	Secrets     []Secret  `json:"secrets,omitempty"`
-	Registry    *Registry `json:"registry,omitempty"`
+	OperationID string `json:"operation_id"`
+	InputDigest string `json:"input_digest"`
+	Image       string `json:"image"`
+	CPUs        int    `json:"cpus"`
+	MemoryMiB   int    `json:"memory_mib"`
+	DiskGiB     int    `json:"disk_gib"`
+	// WorkspaceGiB sizes the sandbox's own disk at /workspace, where Kandev
+	// starts every agent. Needs a host with FeatureWorkspaceDisk.
+	WorkspaceGiB int       `json:"workspace_gib"`
+	ExpiresAt    string    `json:"expires_at"`
+	KandevAPI    KandevAPI `json:"kandev_api"`
+	EgressAllow  []string  `json:"egress_allow,omitempty"`
+	Env          []EnvVar  `json:"env,omitempty"`
+	Secrets      []Secret  `json:"secrets,omitempty"`
+	Registry     *Registry `json:"registry,omitempty"`
 }
 
 // AgentctlRequest is agentctl's stdin header. Nonce is secret.

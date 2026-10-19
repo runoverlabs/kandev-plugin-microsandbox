@@ -4,7 +4,7 @@
 # with the pinned Kandev's own validator.
 id: "kandev-plugin-microsandbox"
 api_version: 2
-version: "0.1.0-dev.1"
+version: "0.1.0-dev.2"
 display_name: "microsandbox"
 description: "Run each Kandev session in its own microsandbox microVM on registered sandbox hosts."
 author: "naerymdan"
@@ -112,6 +112,12 @@ executor_providers:
           title: "Root disk (GiB)"
           description: "Default 20."
           minimum: 5
+          maximum: 500
+        workspace_gib:
+          type: integer
+          title: "Workspace disk (GiB)"
+          description: "A disk of its own, mounted at /workspace and removed with the sandbox. Default 20."
+          minimum: 1
           maximum: 500
         max_lifetime_hours:
           type: integer

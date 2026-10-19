@@ -87,6 +87,7 @@ background pass every 6 hours and on every **Test**. A host whose
 | `host_key_mismatch` | The host presented a different key than the pinned one. |
 | `unreachable` | No answer from the host's SSH server. |
 | `protocol` | msbctl speaks a different host protocol version. |
+| `outdated` | msbctl lacks a feature this plugin needs (the hint names it, such as `workspace_disk`). Update msb-manager there. |
 | `disabled` | `[kandev] enabled` is not true in the host's msbctl config. |
 | `no_kvm` | `/dev/kvm` is missing on the host. |
 | `no_data_path` | The host's HTTPS front end for sandboxes is not up (for `serve = "tailscale"`: tailscaled is not running with a DNS name). |
@@ -112,8 +113,9 @@ Found on the first real run (Kandev 0.97.0, msb-manager 0.4.0):
   on `proxy_port_pool` (default 30000–39999), with four ports per sandbox. On
   a host with a firewall (firewalld on Fedora allows only `ssh`), open that
   range to the Kandev server's address only.
-- **The image needs `/workspace`** until msbctl creates it (feature request
-  F20): Kandev starts every agent there.
+- **Hosts need a workspace disk** (feature request F20): Kandev starts every
+  agent in `/workspace`, and nothing else creates it. msb-manager 0.4.0 does
+  not have it, so Test reports `outdated` there and placement skips it.
 - **Terminal-passthrough agents and the task's shell terminal do not run in
   the sandbox** in Kandev 0.97.0: Kandev starts them on the Kandev server
   instead. Use agents that speak ACP.
@@ -134,6 +136,7 @@ saved.
 | `cpus` | yes | 1–16 |
 | `memory_mib` | yes | 512–65536 |
 | `disk_gib` | no | 5–500, default 20 |
+| `workspace_gib` | no | 1–500, default 20. A disk of its own at `/workspace`, where Kandev starts the agent; removed with the sandbox |
 | `max_lifetime_hours` | yes | 1–168. The sandbox is destroyed at this age |
 | `retain_hours` | no | 0–168, default 24 |
 | `egress_allow` | no | Comma-separated `host` or `host:port`; `*.` wildcards allowed. No IPs, URLs or single-label names, and the last label is at least two characters. The host must also permit each entry in `[kandev] allow_extra` (below) |

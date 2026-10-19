@@ -38,6 +38,7 @@ func TestParseMinimalProfileAppliesDefaults(t *testing.T) {
 	assert.Equal(t, 4, spec.CPUs)
 	assert.Equal(t, 8192, spec.MemoryMiB)
 	assert.Equal(t, DefaultDiskGiB, spec.DiskGiB)
+	assert.Equal(t, DefaultWorkspaceGiB, spec.WorkspaceGiB)
 	assert.Equal(t, DefaultRetainHours, spec.RetainHours)
 	assert.Equal(t, 8, spec.MaxLifetimeHours)
 	assert.Empty(t, spec.Secrets)
@@ -110,6 +111,8 @@ func TestParseNumericBounds(t *testing.T) {
 		{FieldMemoryMiB, "511", CodeOutOfRange},
 		{FieldMemoryMiB, "65537", CodeOutOfRange},
 		{FieldDiskGiB, "4", CodeOutOfRange},
+		{FieldWorkspaceGiB, "0", CodeOutOfRange},
+		{FieldWorkspaceGiB, "501", CodeOutOfRange},
 		{FieldMaxLifetimeHours, "169", CodeOutOfRange},
 		{FieldRetainHours, "-1", CodeOutOfRange},
 	}

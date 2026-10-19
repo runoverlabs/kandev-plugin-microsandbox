@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"kandev-plugin-microsandbox/internal/hosts"
 )
@@ -67,8 +68,20 @@ type Error struct {
 	Reason string
 }
 
-// ReasonProtocol marks a host on another protocol version.
-const ReasonProtocol = "protocol"
+// Reasons a host's health is unsupported.
+const (
+	ReasonProtocol = "protocol" // another protocol version
+	ReasonOutdated = "outdated" // protocol 1, but without a feature the plugin needs
+)
+
+// FeatureWorkspaceDisk is a host that gives each sandbox its own disk at
+// /workspace, sized by the provision request. msb-manager 0.4.0 lacks it and
+// ignores the request field, leaving no /workspace, where Kandev starts every
+// agent; so the plugin refuses such a host.
+const FeatureWorkspaceDisk = "workspace_disk"
+
+// RequiredFeatures are the health features a host must list.
+var RequiredFeatures = []string{FeatureWorkspaceDisk}
 
 func (e *Error) Error() string { return "msbctl kandev: " + e.Code }
 
@@ -107,6 +120,19 @@ type Health struct {
 	// TLS is the proxy's installed certificate; absent on hosts that do not
 	// run serve = "proxy".
 	TLS *TLSStatus `json:"tls,omitempty"`
+	// Features are additions within protocol 1, by name.
+	Features []string `json:"features,omitempty"`
+}
+
+// Missing returns the required features the host does not list.
+func (h Health) Missing() []string {
+	var missing []string
+	for _, want := range RequiredFeatures {
+		if !slices.Contains(h.Features, want) {
+			missing = append(missing, want)
+		}
+	}
+	return missing
 }
 
 // ServeStatus reports whether the host's HTTPS data path is up. The host
@@ -145,6 +171,9 @@ func (c *Client) Health(ctx context.Context, h hosts.Host) (Health, error) {
 	}
 	if out.Protocol != ProtocolVersion {
 		return out, &Error{Code: CodeUnsupported, Reason: ReasonProtocol}
+	}
+	if len(out.Missing()) > 0 {
+		return out, &Error{Code: CodeUnsupported, Reason: ReasonOutdated}
 	}
 	return out, nil
 }

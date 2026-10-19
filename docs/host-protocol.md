@@ -78,10 +78,15 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
     "max_cpus": 32, "cpus": 8,
     "max_memory_mib": 98304, "memory_mib": 16384
   },
-  "serve": {"ok": true, "mode": "tailscale"}
+  "serve": {"ok": true, "mode": "tailscale"},
+  "features": ["workspace_disk"]
 }
 ```
 
+- `features` are additions within protocol 1. The plugin requires
+  `workspace_disk` (feature request F20) and reports a host without it as
+  `outdated`: msb-manager 0.4.0 ignores `workspace_gib` and would provision
+  sandboxes with no `/workspace`.
 - `enabled` is `[kandev] enabled` from the host's msbctl config.
 - `capacity` counts **kandev sandboxes only**, against the `[kandev]`
   limits. `max_memory` is reported in MiB.
@@ -93,7 +98,8 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
   `none`). A `reason` sent when it is not ok is msbctl's text and is not
   read.
 
-A host is a placement candidate only when `protocol` is 1 and `kvm`,
+A host is a placement candidate only when `protocol` is 1, it lists every
+required feature, and `kvm`,
 `enabled` and `serve.ok` are all true. Among those, placement drops hosts
 without room for the requested CPUs and memory and a sandbox slot, then picks
 the most free memory, then the fewest sandboxes, then the name. The host

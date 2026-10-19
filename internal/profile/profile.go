@@ -23,6 +23,7 @@ const (
 	FieldCPUs             = "cpus"
 	FieldMemoryMiB        = "memory_mib"
 	FieldDiskGiB          = "disk_gib"
+	FieldWorkspaceGiB     = "workspace_gib"
 	FieldMaxLifetimeHours = "max_lifetime_hours"
 	FieldRetainHours      = "retain_hours"
 	FieldEgressAllow      = "egress_allow"
@@ -38,8 +39,9 @@ const ExtraSecretSlots = 3
 // Defaults for optional fields. The manifest schema has no `default`
 // keyword, so the profile form shows these only in field descriptions.
 const (
-	DefaultDiskGiB     = 20
-	DefaultRetainHours = 24
+	DefaultDiskGiB      = 20
+	DefaultWorkspaceGiB = 20
+	DefaultRetainHours  = 24
 )
 
 // MaxLifetimeHours is the manifest's maximum_lifetime_seconds in hours.
@@ -109,6 +111,7 @@ type Spec struct {
 	CPUs             int
 	MemoryMiB        int
 	DiskGiB          int
+	WorkspaceGiB     int
 	MaxLifetimeHours int
 	RetainHours      int
 	EgressAllow      []string
@@ -206,6 +209,7 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 		{FieldCPUs, true, 1, 16, 0, &spec.CPUs},
 		{FieldMemoryMiB, true, 512, 65536, 0, &spec.MemoryMiB},
 		{FieldDiskGiB, false, 5, 500, DefaultDiskGiB, &spec.DiskGiB},
+		{FieldWorkspaceGiB, false, 1, 500, DefaultWorkspaceGiB, &spec.WorkspaceGiB},
 		{FieldMaxLifetimeHours, true, 1, MaxLifetimeHours, 0, &spec.MaxLifetimeHours},
 		{FieldRetainHours, false, 0, MaxLifetimeHours, DefaultRetainHours, &spec.RetainHours},
 	} {

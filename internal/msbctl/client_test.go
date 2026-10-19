@@ -38,7 +38,7 @@ func (f *fakeRunner) Run(_ context.Context, _ hosts.Host, args []string, stdin i
 const healthy = `{"protocol":1,"msbctl_version":"0.4.0","msb_version":"0.7.7","kvm":true,"enabled":true,
  "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
  "capacity":{"max_sandboxes":12,"sandboxes":3,"max_cpus":32,"cpus":8,"max_memory_mib":98304,"memory_mib":16384},
- "serve":{"ok":true,"mode":"tailscale"},"tls":{"installed":false}}`
+ "serve":{"ok":true,"mode":"tailscale"},"tls":{"installed":false},"features":["workspace_disk"]}`
 
 func TestHealthDecodesAndSendsVerb(t *testing.T) {
 	runner := &fakeRunner{reply: reply{stdout: healthy}}
@@ -54,7 +54,7 @@ func TestHealthDecodesAndSendsVerb(t *testing.T) {
 }
 
 func TestHealthRefusesOtherProtocolVersions(t *testing.T) {
-	runner := &fakeRunner{reply: reply{stdout: `{"protocol":2,"kvm":true,"enabled":true,"serve":{"ok":true},"tls":{"installed":false}}`}}
+	runner := &fakeRunner{reply: reply{stdout: `{"protocol":2,"kvm":true,"enabled":true,"serve":{"ok":true},"tls":{"installed":false},"features":["workspace_disk"]}`}}
 	_, err := New(runner).Health(context.Background(), hosts.Host{})
 	assert.Equal(t, CodeUnsupported, CodeOf(err))
 	var e *Error
@@ -62,11 +62,24 @@ func TestHealthRefusesOtherProtocolVersions(t *testing.T) {
 	assert.Equal(t, ReasonProtocol, e.Reason)
 }
 
+// msb-manager 0.4.0 speaks protocol 1 but has no workspace disk, and ignores
+// workspace_gib: sandboxes there would have no /workspace. Refuse it.
+func TestHealthRefusesAHostWithoutRequiredFeatures(t *testing.T) {
+	old := strings.Replace(healthy, `,"features":["workspace_disk"]`, ``, 1)
+	require.NotEqual(t, healthy, old)
+	health, err := New(&fakeRunner{reply: reply{stdout: old}}).Health(context.Background(), hosts.Host{})
+	var e *Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, CodeUnsupported, e.Code)
+	assert.Equal(t, ReasonOutdated, e.Reason)
+	assert.Equal(t, []string{FeatureWorkspaceDisk}, health.Missing())
+}
+
 func TestCapacityRequiresAUsableHost(t *testing.T) {
 	for _, body := range []string{
-		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true},"tls":{"installed":false}}`,
-		`{"protocol":1,"kvm":true,"enabled":false,"serve":{"ok":true},"tls":{"installed":false}}`,
-		`{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":false},"tls":{"installed":false}}`,
+		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true},"tls":{"installed":false},"features":["workspace_disk"]}`,
+		`{"protocol":1,"kvm":true,"enabled":false,"serve":{"ok":true},"tls":{"installed":false},"features":["workspace_disk"]}`,
+		`{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":false},"tls":{"installed":false},"features":["workspace_disk"]}`,
 	} {
 		_, err := New(&fakeRunner{reply: reply{stdout: body}}).Capacity(context.Background(), hosts.Host{})
 		assert.Equal(t, CodeUnavailable, CodeOf(err), body)
@@ -170,7 +183,7 @@ func TestFindOperationAndShowNotFound(t *testing.T) {
 func TestHealthReadsProxyAndTLS(t *testing.T) {
 	body := `{"protocol":1,"kvm":true,"enabled":true,
  "serve":{"ok":true,"mode":"proxy","listen":"100.64.0.7","running":true},
- "tls":{"installed":true,"subject":"sbx-01.tailnet.ts.net","not_after":"2027-01-17T00:00:00Z","issuer_sha256":"ab"}}`
+ "tls":{"installed":true,"subject":"sbx-01.tailnet.ts.net","not_after":"2027-01-17T00:00:00Z","issuer_sha256":"ab"},"features":["workspace_disk"]}`
 	health, err := New(&fakeRunner{reply: reply{stdout: body}}).Health(context.Background(), hosts.Host{})
 	require.NoError(t, err)
 	assert.Equal(t, ServeProxy, health.Serve.Mode)

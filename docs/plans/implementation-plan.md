@@ -623,7 +623,7 @@ Found on the first real run (Oct 19, Kandev 0.97.0, msb-manager 0.4.0 on a real 
 
 ## Base image
 
-Kandev creates the session's agentctl instance with its workspace at **`/workspace`** (`pluginExecutorWorkspacePath`, `lifecycle/executor_plugin.go`) and starts the agent there, but nothing creates the directory: the first real run failed on a stock image with `fork/exec …: no such file or directory`. msbctl is asked to create it at provision (feature request F20); until then the image must contain it.
+Kandev creates the session's agentctl instance with its workspace at **`/workspace`** (`pluginExecutorWorkspacePath`, `lifecycle/executor_plugin.go`) and starts the agent there, but nothing creates the directory: the first real run failed on a stock image with `fork/exec …: no such file or directory`. msbctl is asked to give each sandbox its own disk there (feature request F20, `workspace_gib` in the profile), removed with the sandbox; a host directory was rejected (virtiofs speed and git trouble, no quota, data left on the host).
 
 The image is complete: kandev VMs run no msbctl bootstrap. It holds git, gh, the agent CLIs a project uses, the language toolchains, `socat` (for the port fallback), and a non-root user. Pin it by digest. msb boots a host directory given as the image, so only OCI references are accepted **[exists: `image_problem()`]**. The msb-manager bootstrap (`bootstrap.sh`) is a usable reference for what to install and from where, since it is written to work under deny-by-default egress (apt over HTTPS, pinned release downloads with checksums).
 
