@@ -949,7 +949,7 @@ sandboxes already keep their clone on `<prefix>-workspace`
   plugin refuses a host that does not list it, because 0.4.0 ignores
   unknown header keys: it would provision without a workspace and report
   success. `features` is the place for later additions within protocol 1.
-- Optional: count workspace disks against a `[kandev] max_disk` limit, and
+- Optional (not built): count workspace disks against a `[kandev] max_disk` limit, and
   report `max_disk_gib`/`disk_gib` in `capacity`. The plugin does not use
   them yet.
 
@@ -957,6 +957,18 @@ Why a disk and not a host directory: a host mount is virtiofs, which is
 slow for git and builds and has corrupted git's index in practice; it has
 no quota, so one build can fill the host; it puts what untrusted code wrote
 on the host's own filesystem; and a host path can outlive its sandbox.
+
+**Built** in msb-manager `main`
+([PR #65](https://github.com/runoverlabs/sandbox-manager/pull/65), merge
+`5e3bc64`, 2026-10-19), not released yet. One difference, an improvement:
+the disk is msb's **owned** kind (`--mount-owned
+/workspace:kind=disk,size=<n>G`), not a named `<prefix>-workspace` volume.
+msb deletes an owned disk with its VM, so nothing of a workspace outlives
+its sandbox however the VM goes (purge, expiry, an orphan's removal, `msb rm
+-f`), with no second deletion step that could fail. Checked on real msb
+0.7.7: an empty ext4 `/workspace` of the requested size (no `lost+found`),
+kept across `stop` and `kandev start`, and gone after purge and after
+expiry. The optional `max_disk` limit and capacity fields were not built.
 
 **Accept:** a sandbox gets an empty, writable ext4 `/workspace` of the
 requested size; it survives `stop`/`start`; `purge`, expiry and reconcile
