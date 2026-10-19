@@ -77,7 +77,8 @@ func TestManifestActionsAreTheHandledOnesAndAdminOnly(t *testing.T) {
 		ActionCACreate, ActionCAGet,
 		ActionEgressDefaults, ActionEgressList, ActionEgressPut, ActionEgressRemove,
 		ActionHostsAdd, ActionHostsDrain, ActionHostsList, ActionHostsRemove,
-		ActionHostsScan, ActionHostsSetup, ActionHostsSetupStatus, ActionHostsTest, ActionHostsUpdate, ActionSetupStatus,
+		ActionHostsScan, ActionHostsSetup, ActionHostsSetupStatus, ActionHostsTest, ActionHostsUpdate,
+		ActionSecretsList, ActionSecretsPut, ActionSecretsRemove, ActionSetupStatus,
 	}, keys)
 }
 
@@ -93,12 +94,10 @@ func TestManifestProviderMatchesTheCode(t *testing.T) {
 		profile.FieldPlacement, profile.FieldImage, profile.FieldCPUs, profile.FieldMemoryMiB,
 		profile.FieldDiskGiB, profile.FieldWorkspaceGiB, profile.FieldMaxLifetimeHours, profile.FieldRetainHours,
 		profile.FieldEgressAllow, profile.FieldEgressGroups, profile.FieldEnv, profile.FieldRegistryUsername, profile.FieldRegistryPassword,
+		profile.FieldSecrets,
 	}
+	// The secrets field only names the plugin's secrets, so it is not one.
 	secret := map[string]bool{profile.FieldRegistryPassword: true}
-	for slot := 1; slot <= profile.ExtraSecretSlots; slot++ {
-		want = append(want, profile.SecretField(slot, "name"), profile.SecretField(slot, "value"), profile.SecretField(slot, "hosts"))
-		secret[profile.SecretField(slot, "value")] = true
-	}
 	var got []string
 	for name, property := range p.ProfileSchema.Properties {
 		got = append(got, name)

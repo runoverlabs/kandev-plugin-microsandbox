@@ -75,6 +75,15 @@ func (r *Runtime) ValidateExecutorProfile(ctx context.Context, req *pluginsdk.Va
 		}
 		response.FieldErrors = append(response.FieldErrors, fieldError(profile.FieldError{Field: profile.FieldEgressGroups, Code: code}))
 	}
+	unknown, err := r.unknownSecrets(ctx, spec.SecretNames)
+	if err != nil {
+		log.Printf("validate executor profile: %v", err)
+		response.Error = providerError(msbctl.CodeUnavailable, "secretsUnavailable")
+		return response, nil
+	}
+	if len(unknown) > 0 {
+		response.FieldErrors = append(response.FieldErrors, fieldError(profile.FieldError{Field: profile.FieldSecrets, Code: CodeUnresolved}))
+	}
 	return response, nil
 }
 

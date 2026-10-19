@@ -8,7 +8,7 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
 
 - Executor provider `microsandbox` with the full profile schema. Profiles are
   validated on save: digest-pinned image, resource bounds, egress entries,
-  environment, paired registry credentials, up to three host-bound secrets,
+  environment, paired registry credentials, secrets by name,
   reserved names, and a placement that selects a registered, non-draining
   host.
 - Sandbox host registry in plugin state, with admin-only `hosts.list`,
@@ -50,6 +50,11 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
   bounded by msbctl's real limit, its 64 KiB provision header: a sandbox's
   egress list gets 32 KiB of it, and a provision that would not fit fails
   with `invalid_config` (`requestTooLarge`) before anything is created.
+- Secrets kept by the plugin (`secrets.list`, `secrets.put`,
+  `secrets.remove`): a name, a value in the plugin's secret store, and the
+  hosts it may be sent to. Profiles name the ones they use in one `secrets`
+  field, which replaces the nine `extra_secret_N_name/_value/_hosts` fields:
+  a profile can use a secret but never read it or redirect it.
 - `hosts.setup`: set up a bare KVM machine (an EC2 `.metal` instance, say)
   from an admin SSH login used once and never stored, then register and test
   it. It checks for KVM first, installs missing packages, creates a no-sudo

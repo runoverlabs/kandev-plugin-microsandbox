@@ -82,11 +82,11 @@ func TestValidateReportsEveryProblemTogether(t *testing.T) {
 func TestValidateNeverEchoesSecretValues(t *testing.T) {
 	r := newRuntime(t, newFakeHost())
 	config := profileConfig("label:none")
-	config["extra_secret_1_name"] = "GH_TOKEN"
-	config["extra_secret_1_hosts"] = "github.com"
-	res := validate(t, r, config, map[string]string{"extra_secret_1_value": "hunter2-very-secret"})
+	config["secrets"] = "GH_TOKEN"
+	config["registry_username"] = "bot"
+	res := validate(t, r, config, map[string]string{"registry_password": "hunter2-very-secret"})
 	assert.NotContains(t, res.String(), "hunter2")
-	assert.Equal(t, "reserved", fieldCodes(res)["extra_secret_1_name"])
+	assert.Equal(t, "reserved", fieldCodes(res)["secrets"])
 }
 
 func TestValidateWithUnreadableRegistryIsUnavailable(t *testing.T) {

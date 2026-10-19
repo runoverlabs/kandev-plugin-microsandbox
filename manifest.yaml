@@ -83,6 +83,18 @@ actions:
     scope: "workspace"
     access: "admin"
     max_body_bytes: 4096
+  - key: "secrets.list"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "secrets.put"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 24576
+  - key: "secrets.remove"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
   - key: "setup.status"
     scope: "workspace"
     access: "admin"
@@ -179,38 +191,10 @@ executor_providers:
           type: string
           title: "Registry password"
           secret: true
-        extra_secret_1_name:
+        secrets:
           type: string
-          title: "Secret 1: variable"
-          description: "The guest sees a placeholder; the sandbox host substitutes the value into request headers bound for the listed hosts only."
-        extra_secret_1_value:
-          type: string
-          title: "Secret 1: value"
-          secret: true
-        extra_secret_1_hosts:
-          type: string
-          title: "Secret 1: hosts"
-          description: "Comma-separated hostnames the value may be sent to."
-        extra_secret_2_name:
-          type: string
-          title: "Secret 2: variable"
-        extra_secret_2_value:
-          type: string
-          title: "Secret 2: value"
-          secret: true
-        extra_secret_2_hosts:
-          type: string
-          title: "Secret 2: hosts"
-        extra_secret_3_name:
-          type: string
-          title: "Secret 3: variable"
-        extra_secret_3_value:
-          type: string
-          title: "Secret 3: value"
-          secret: true
-        extra_secret_3_hosts:
-          type: string
-          title: "Secret 3: hosts"
+          title: "Secrets"
+          description: "Comma-separated names of secrets kept by the plugin (its Secrets page), such as NPM_TOKEN. The guest sees each as a variable holding a placeholder; the sandbox host substitutes the value into request headers bound for that secret's hosts only."
     # Only what routes later calls: the host that owns the sandbox, its
     # name there and the environment id. Never a secret, a nonce or a lease.
     resource_state_schema:

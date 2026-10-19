@@ -198,6 +198,14 @@ func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *plugins
 		return fail(providerError(msbctl.CodeUnavailable, "egressUnavailable"))
 	}
 
+	if spec.Secrets, err = r.resolveSecrets(ctx, spec.SecretNames); err != nil {
+		log.Printf("provision %s: %v", rc.GetEnvironmentId(), err)
+		if errors.Is(err, ErrUnknownSecret) {
+			return fail(providerError(msbctl.CodeInvalidConfig, "secretUnresolved"))
+		}
+		return fail(providerError(msbctl.CodeUnavailable, "secretsUnavailable"))
+	}
+
 	progress(ctx, callbacks, rc, "provision", 0)
 	host, perr := r.placeOrReuse(ctx, client, registry, spec, rc)
 	if perr != nil {

@@ -230,56 +230,36 @@ func TestParsePrivateImageMustNameItsRegistry(t *testing.T) {
 	assert.Empty(t, errs)
 }
 
-func TestParseExtraSecrets(t *testing.T) {
-	config := with(validConfig(),
-		SecretField(1, "name"), "NPM_TOKEN",
-		SecretField(1, "hosts"), "registry.npmjs.org",
-		SecretField(3, "name"), "SENTRY_AUTH_TOKEN",
-		SecretField(3, "hosts"), "sentry.io, api.sentry.io",
-	)
-	secrets := map[string]string{SecretField(1, "value"): "npm-secret", SecretField(3, "value"): "sentry-secret"}
-	spec, errs := Parse(config, secrets)
+func TestParseSecretNames(t *testing.T) {
+	spec, errs := Parse(with(validConfig(), FieldSecrets, " NPM_TOKEN, SENTRY_AUTH_TOKEN ,NPM_TOKEN,, "), nil)
 	require.Empty(t, errs)
-	assert.Equal(t, []Secret{
-		{Name: "NPM_TOKEN", Value: "npm-secret", Hosts: []string{"registry.npmjs.org"}},
-		{Name: "SENTRY_AUTH_TOKEN", Value: "sentry-secret", Hosts: []string{"sentry.io", "api.sentry.io"}},
-	}, spec.Secrets)
+	assert.Equal(t, []string{"NPM_TOKEN", "SENTRY_AUTH_TOKEN"}, spec.SecretNames)
+	assert.Empty(t, spec.Secrets, "values come from the plugin's store at provision")
+
+	for raw, code := range map[string]string{
+		"npm_token":         CodeInvalid,
+		"TOKEN, bad-name":   CodeInvalid,
+		"GH_TOKEN":          CodeReserved,
+		"ANTHROPIC_API_KEY": CodeReserved,
+	} {
+		_, errs := Parse(with(validConfig(), FieldSecrets, raw), nil)
+		assert.Equal(t, []FieldError{{FieldSecrets, code}}, errs, raw)
+	}
+	_, errs = Parse(with(validConfig(), FieldSecrets, "NODE_ENV", FieldEnv, "NODE_ENV=x"), nil)
+	assert.Equal(t, []FieldError{{FieldSecrets, CodeDuplicate}}, errs, "the same variable twice in the guest")
 }
 
-func TestParseExtraSecretProblems(t *testing.T) {
-	name, val, hosts := SecretField(1, "name"), SecretField(1, "value"), SecretField(1, "hosts")
-	cases := []struct {
-		label   string
-		config  map[string]string
-		secrets map[string]string
-		want    []FieldError
-	}{
-		{"value without name or hosts", nil, map[string]string{val: "x"},
-			[]FieldError{{name, CodeRequired}, {hosts, CodeRequired}}},
-		{"name without value", map[string]string{name: "TOKEN", hosts: "api.example.com"}, nil,
-			[]FieldError{{val, CodeRequired}}},
-		{"reserved name", map[string]string{name: "GH_TOKEN", hosts: "github.com"}, map[string]string{val: "x"},
-			[]FieldError{{name, CodeReserved}}},
-		{"collides with env", map[string]string{name: "NODE_ENV", hosts: "api.example.com", FieldEnv: "NODE_ENV=x"}, map[string]string{val: "x"},
-			[]FieldError{{name, CodeDuplicate}}},
-		{"wildcard host", map[string]string{name: "TOKEN", hosts: "*.example.com"}, map[string]string{val: "x"},
-			[]FieldError{{hosts, CodeInvalid}}},
+func TestSecretNameAndHosts(t *testing.T) {
+	assert.Empty(t, CheckSecretName("NPM_TOKEN"))
+	assert.Equal(t, CodeRequired, CheckSecretName(""))
+	assert.Equal(t, CodeReserved, CheckSecretName("PATH"))
+	hosts, ok := ParseSecretHosts("Registry.npmjs.org, api.example.com:8443, registry.npmjs.org")
+	assert.True(t, ok)
+	assert.Equal(t, []string{"registry.npmjs.org", "api.example.com:8443"}, hosts)
+	for _, bad := range []string{"", " , ", "*.example.com", "a b.example.com"} {
+		_, ok := ParseSecretHosts(bad)
+		assert.False(t, ok, bad)
 	}
-	for _, c := range cases {
-		_, errs := Parse(with(validConfig(), flatten(c.config)...), c.secrets)
-		assert.ElementsMatch(t, c.want, errs, c.label)
-	}
-}
-
-func TestParseRejectsDuplicateSecretNamesAcrossSlots(t *testing.T) {
-	config := with(validConfig(),
-		SecretField(1, "name"), "TOKEN", SecretField(1, "hosts"), "a.example.com",
-		SecretField(2, "name"), "TOKEN", SecretField(2, "hosts"), "b.example.com",
-	)
-	secrets := map[string]string{SecretField(1, "value"): "x", SecretField(2, "value"): "y"}
-	spec, errs := Parse(config, secrets)
-	assert.Equal(t, []FieldError{{SecretField(2, "name"), CodeDuplicate}}, errs)
-	assert.Len(t, spec.Secrets, 1)
 }
 
 func TestMessageID(t *testing.T) {

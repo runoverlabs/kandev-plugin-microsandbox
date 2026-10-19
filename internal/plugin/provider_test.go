@@ -40,6 +40,10 @@ func newProviderFixture(t *testing.T, names ...string) *providerFixture {
 	r.SetHost(host)
 	t.Cleanup(r.Close)
 	f := &providerFixture{r: r, api: api, hosts: map[string]*fakeMsbctl{}, srv: map[string]*sshtest.Server{}}
+	// fullProfile names it.
+	require.Equal(t, 201, first(call(t, r, ActionSecretsPut, map[string]any{
+		"name": "NPM_TOKEN", "hosts": "registry.npmjs.org", "value": plantedSecret,
+	})))
 	key := pluginKey(t, r)
 	for _, name := range names {
 		fake := newFakeMsbctl(name)
@@ -70,10 +74,9 @@ func fullProfile() *pluginsdk.ExecutorProfileSnapshot {
 	config["egress_allow"] = "pypi.org"
 	config["env"] = "NODE_ENV=development"
 	config["registry_username"] = "bot"
-	config["extra_secret_1_name"] = "NPM_TOKEN"
-	config["extra_secret_1_hosts"] = "registry.npmjs.org"
+	config["secrets"] = "NPM_TOKEN"
 	return &pluginsdk.ExecutorProfileSnapshot{ProfileId: "p1", Config: config, SecretValues: map[string]string{
-		"extra_secret_1_value": plantedSecret, "registry_password": plantedRegPW,
+		"registry_password": plantedRegPW,
 	}}
 }
 
@@ -366,10 +369,7 @@ func TestAttach(t *testing.T) {
 	assert.Equal(t, "unsupported", attach(withSecrets).Error.Code, "no secret values to re-send at attach")
 
 	plain := fullProfile()
-	for _, k := range []string{"extra_secret_1_name", "extra_secret_1_hosts"} {
-		delete(plain.Config, k)
-	}
-	delete(plain.SecretValues, "extra_secret_1_value")
+	delete(plain.Config, "secrets")
 	res := f.provision(t, "env-2", "op-env-2", plain)
 	require.Nil(t, res.Error)
 	f.hosts["sbx-01"].sandbox("env-2").rec.State = msbctl.StateStopped
@@ -410,7 +410,7 @@ func TestProvisionStopsWhenTheCheckpointIsRefused(t *testing.T) {
 func TestProvisionRefusesARequestLargerThanTheHeader(t *testing.T) {
 	f := newProviderFixture(t, "sbx-01")
 	snap := fullProfile()
-	snap.SecretValues["extra_secret_1_value"] = strings.Repeat("s", msbctl.MaxHeaderBytes)
+	snap.SecretValues["registry_password"] = strings.Repeat("s", msbctl.MaxHeaderBytes)
 	res := f.provision(t, "env-1", "op-1", snap)
 	require.NotNil(t, res.Error)
 	assert.Equal(t, "invalid_config", res.Error.Code)

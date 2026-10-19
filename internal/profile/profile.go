@@ -9,7 +9,6 @@
 package profile
 
 import (
-	"fmt"
 	"regexp"
 	"slices"
 	"sort"
@@ -34,11 +33,8 @@ const (
 	FieldEnv              = "env"
 	FieldRegistryUsername = "registry_username"
 	FieldRegistryPassword = "registry_password"
+	FieldSecrets          = "secrets"
 )
-
-// ExtraSecretSlots is how many extra_secret_N_* field triples the manifest
-// declares.
-const ExtraSecretSlots = 3
 
 // Defaults for optional fields. The manifest schema has no `default`
 // keyword, so the profile form shows these only in field descriptions.
@@ -125,7 +121,10 @@ type Spec struct {
 	Env              []EnvVar
 	RegistryUsername string
 	RegistryPassword string
-	Secrets          []Secret
+	// SecretNames name secrets kept by the plugin, which supplies their
+	// values and hosts; Secrets is filled from them at provision.
+	SecretNames []string
+	Secrets     []Secret
 }
 
 // NamePattern is the shape of a host name and a host label. Host names end
@@ -257,19 +256,56 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 	for _, item := range env {
 		taken[strings.ToUpper(item.Name)] = true
 	}
-	for slot := 1; slot <= ExtraSecretSlots; slot++ {
-		secret, present, slotErrs := parseSecret(config, secrets, slot, taken)
-		errs = append(errs, slotErrs...)
-		if present && len(slotErrs) == 0 {
-			spec.Secrets = append(spec.Secrets, secret)
-		}
+	names, code := parseSecretNames(value(config, FieldSecrets), taken)
+	if code != "" {
+		add(FieldSecrets, code)
 	}
+	spec.SecretNames = names
 	return spec, errs
 }
 
-// SecretField names one field of an extra_secret_N triple.
-func SecretField(slot int, part string) string {
-	return fmt.Sprintf("extra_secret_%d_%s", slot, part)
+// parseSecretNames reads the comma-separated secret names a profile uses.
+// A name an env entry already sets is a duplicate: both would be the same
+// variable in the guest.
+func parseSecretNames(raw string, taken map[string]bool) ([]string, string) {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			continue
+		}
+		if code := CheckSecretName(name); code != "" {
+			return nil, code
+		}
+		if taken[name] {
+			return nil, CodeDuplicate
+		}
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out, ""
+}
+
+// CheckSecretName returns the code for a secret's name, "" when usable: the
+// guest sees it as an environment variable.
+func CheckSecretName(name string) string {
+	switch {
+	case name == "":
+		return CodeRequired
+	case !envNamePattern.MatchString(name):
+		return CodeInvalid
+	case IsReservedEnv(name):
+		return CodeReserved
+	}
+	return ""
+}
+
+// ParseSecretHosts reads the hosts a secret may be sent to: host or
+// host:port, no wildcards, at least one.
+func ParseSecretHosts(raw string) ([]string, bool) {
+	hosts, ok := parseHostList(raw, false)
+	return hosts, ok && len(hosts) > 0
 }
 
 func value(config map[string]string, field string) string {
@@ -400,41 +436,6 @@ func parseEnv(raw string) ([]EnvVar, []FieldError) {
 		}
 	}
 	return out, dedupe(errs)
-}
-
-func parseSecret(config, secrets map[string]string, slot int, taken map[string]bool) (Secret, bool, []FieldError) {
-	nameField, valueField, hostsField := SecretField(slot, "name"), SecretField(slot, "value"), SecretField(slot, "hosts")
-	name := value(config, nameField)
-	secretValue := secrets[valueField]
-	rawHosts := value(config, hostsField)
-	if name == "" && secretValue == "" && rawHosts == "" {
-		return Secret{}, false, nil
-	}
-	var errs []FieldError
-	add := func(field, code string) { errs = append(errs, FieldError{Field: field, Code: code}) }
-	switch {
-	case name == "":
-		add(nameField, CodeRequired)
-	case !envNamePattern.MatchString(name):
-		add(nameField, CodeInvalid)
-	case IsReservedEnv(name):
-		add(nameField, CodeReserved)
-	case taken[strings.ToUpper(name)]:
-		add(nameField, CodeDuplicate)
-	default:
-		taken[strings.ToUpper(name)] = true
-	}
-	if secretValue == "" {
-		add(valueField, CodeRequired)
-	}
-	hosts, ok := parseHostList(rawHosts, false)
-	switch {
-	case !ok:
-		add(hostsField, CodeInvalid)
-	case len(hosts) == 0:
-		add(hostsField, CodeRequired)
-	}
-	return Secret{Name: name, Value: secretValue, Hosts: hosts}, true, errs
 }
 
 func dedupe(errs []FieldError) []FieldError {

@@ -279,6 +279,24 @@ port), addresses (any port), `address:port` (that port) and CIDRs up to /8
 `allow_extra`, and Test checks the default groups against it and reports
 `egress_refused` with the entries it would refuse.
 
+## Secrets
+
+Secrets live in the plugin, not in profiles: each is a name, a value and the
+hosts the value may be sent to, managed by an admin with these actions (and
+on the plugin's Secrets page). A profile only names the ones it uses, in its
+`secrets` field. So whoever edits a profile can give a sandbox a secret, but
+never read the value or send it to a host the admin did not choose.
+
+| Action | Body | Does |
+| --- | --- | --- |
+| `secrets.list` | `{}` | Every secret's name, description, hosts and when it was last changed. Never a value. |
+| `secrets.put` | `{"name": "NPM_TOKEN", "description": "...", "hosts": "registry.npmjs.org", "value": "..."}` | Creates (201) or changes (200) a secret. `value` is required to create; leave it out to change only the hosts or description. Up to 16 KiB, 100 secrets. |
+| `secrets.remove` | `{"name": "NPM_TOKEN"}` | Deletes it. Profiles still naming it fail validation, and their launches fail with `invalid_config` (`secretUnresolved`). |
+
+Names follow the `env` rules below, reserved names included. Hosts are
+`host` or `host:port`, comma-separated, without wildcards. The value is kept
+in the plugin's secret store, never in its state, a log line or a response.
+
 ## Executor profile
 
 One profile per project, using the **microsandbox microVM** provider. Kandev
@@ -299,7 +317,7 @@ saved.
 | `egress_groups` | no | Comma-separated egress group names this profile adds to the defaults, such as `openrouter` or one of your own. Each must exist in the plugin's egress policy |
 | `env` | no | `KEY=VALUE;KEY2=VALUE2`, non-secret values only. Names are uppercase `A-Z`, `0-9`, `_`, at most 64 characters |
 | `registry_username` / `registry_password` | no | Both or neither. A private image must name its registry host (`ghcr.io/…`, `registry.example.com:5000/…`) |
-| `extra_secret_N_name` / `_value` / `_hosts` | no | N = 1–3. A name, a value and at least one host, all together |
+| `secrets` | no | Comma-separated names of the plugin's [secrets](#secrets), such as `NPM_TOKEN, OPENROUTER_API_KEY`. Each must exist |
 
 Names refused for `env` and secrets, the same list msbctl refuses:
 `GH_TOKEN`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, the
@@ -315,7 +333,7 @@ needs git, the agent CLIs the project uses, its toolchains, and a writable
 **`/workspace`**, where Kandev puts the session's checkout. Kandev installs
 agentctl itself at launch.
 
-An extra secret is a host-bound msb secret: the guest only ever sees a
+A secret is a host-bound msb secret: the guest only ever sees a
 placeholder, and the sandbox host substitutes the real value into request
-**headers** bound for the listed hosts. Secret values are re-sent on every
+**headers** bound for the secret's hosts. Secret values are re-sent on every
 start and never stored on the host.
