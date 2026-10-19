@@ -102,6 +102,7 @@ func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { re
 func newRuntime(t *testing.T, host pluginsdk.Host) *Runtime {
 	t.Helper()
 	r := NewRuntime()
+	r.maintEvery = 0 // tests drive maintainHosts directly
 	if host != nil {
 		r.SetHost(host)
 	}

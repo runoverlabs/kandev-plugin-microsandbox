@@ -21,6 +21,13 @@ First development snapshot: the provider skeleton and the host registry
 - Placement: healthy candidates with room, most free memory first.
 - `health` also reports the host's `platform` and `base_url`; `hosts.test`
   warns when that `base_url` differs from the registered one.
+- A root certificate for sandbox hosts: `ca.create` generates one,
+  name-constrained to the hosts' domain, and `ca.get` shows it with install
+  steps for the Kandev server. Host certificates are issued at `hosts.add`
+  and re-issued automatically (missing, expiring within 30 days, another
+  name, or a replaced root) every 6 hours and on `hosts.test`, which also
+  reports whether the Kandev server trusts the root. Needs msbctl's
+  `serve = "proxy"` (not built yet) to take effect.
 - Profile validation follows what msbctl accepts, so a profile it would
   refuse at launch is refused on save: uppercase variable names only, the
   wider reserved-name list (`PATH`, `HOME`, `LD_*`, `MSB_*`, `SSH_*`, …), a

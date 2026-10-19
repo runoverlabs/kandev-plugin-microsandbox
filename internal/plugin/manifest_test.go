@@ -70,7 +70,9 @@ func TestManifestActionsAreTheHandledOnesAndAdminOnly(t *testing.T) {
 		assert.Equal(t, "workspace", a.Scope, a.Key)
 	}
 	sort.Strings(keys)
+	// ca.create and ca.get manage the root certificate (host-side TLS).
 	assert.Equal(t, []string{
+		ActionCACreate, ActionCAGet,
 		ActionHostsAdd, ActionHostsDrain, ActionHostsList, ActionHostsRemove,
 		ActionHostsScan, ActionHostsTest, ActionHostsUpdate,
 	}, keys)

@@ -20,7 +20,9 @@ with any workspace as the action scope).
 | `hosts.update` | a host | Replaces a host's SSH destination, pinned key, base URL and labels. The name cannot change, and the draining flag is kept. |
 | `hosts.drain` | `{"name": "...", "draining": true}` | A draining host gets no new sandboxes but keeps serving its existing ones. |
 | `hosts.remove` | `{"name": "...", "force": false}` | Asks the host for its kandev sandboxes and refuses (409) while it has any. If the host cannot be reached, it refuses (502) unless `force` is set. |
-| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, and a `warning` when the host's own `base_url` differs from the registered one. |
+| `ca.get` | `{}` | The plugin's root certificate (PEM, SHA-256, constraints, expiry), whether this Kandev server trusts it yet, and how to install it. `exists: false` before `ca.create`. |
+| `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. |
+| `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. |
 
 A host:
 
@@ -45,6 +47,30 @@ A host:
   connection leases.
 - `labels`: what `label:<x>` placements select. Lowercased and deduplicated.
 
+### The root certificate
+
+Kandev reaches each sandbox over HTTPS and verifies the certificate against
+the **Kandev server's** system trust store. With `[kandev] serve = "proxy"`
+on a host (the planned default), the host's certificate comes from the
+plugin's own root:
+
+1. `ca.create` with the domain your sandbox hosts' `base_url`s use, such as
+   `tailnet.ts.net` or a headscale `base_domain`. Add `cidrs` only if a
+   `base_url` uses an address.
+2. `ca.get`, and install the root on the Kandev server only, following its
+   `install` steps. Restart Kandev afterwards.
+
+The root is **name-constrained**: it can only ever certify names under those
+suffixes, so trusting it does not let it impersonate any other site to the
+Kandev server, even if its key leaked. Its key stays in the plugin's secret
+store.
+
+**Host certificates need no attention.** The plugin issues one when a host is
+added. It re-issues one whenever a host reports none, one expiring within 30
+days, one for another name, or one from a replaced root. It checks from a
+background pass every 6 hours and on every **Test**. A host whose
+`base_url` is outside the root's constraints is refused at `hosts.add`.
+
 ### Adding a host
 
 1. `hosts.list`, and run the returned `authorize` command on the host:
@@ -65,6 +91,10 @@ A host:
 | `no_kvm` | `/dev/kvm` is missing on the host. |
 | `no_data_path` | The host's HTTPS front end for sandboxes is not up (for `serve = "tailscale"`: tailscaled is not running with a DNS name). |
 | `unavailable` | msbctl ran but returned no health report. |
+| `no_root` | The host runs the TLS proxy, but the plugin has no root yet. Run `ca.create`. |
+| `not_permitted` | The host's `base_url` is outside the root's constraints. |
+| `tls_install_failed` | The host did not accept a new certificate. It is retried automatically. |
+| `root_not_trusted` | The Kandev server does not trust the plugin's root yet. Install it (`ca.get`) and restart Kandev. |
 
 The plugin has **one SSH key** for every host. It is generated on first use,
 kept in the plugin's secret store, and only its public half is ever shown.

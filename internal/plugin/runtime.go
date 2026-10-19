@@ -4,17 +4,20 @@ package plugin
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"golang.org/x/crypto/ssh"
 
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
+	"kandev-plugin-microsandbox/internal/pki"
 	"kandev-plugin-microsandbox/internal/sshx"
 )
 
@@ -43,6 +46,20 @@ type Runtime struct {
 	signer    ssh.Signer
 	publicKey string
 	pool      *sshx.Pool
+
+	caMu sync.Mutex
+	ca   *pki.Root
+	// trustPool is the root pool trust checks use; nil means the system
+	// roots, which is what Kandev verifies leases against.
+	trustPool *x509.CertPool
+	now       func() time.Time
+
+	maintMu     sync.Mutex
+	maintFirst  time.Duration
+	maintEvery  time.Duration // zero disables the maintainer
+	maintCancel context.CancelFunc
+	maintWG     sync.WaitGroup
+	closed      bool
 }
 
 var (
@@ -53,7 +70,7 @@ var (
 
 // NewRuntime returns a Runtime dialing hosts over the network.
 func NewRuntime() *Runtime {
-	return &Runtime{dialer: &net.Dialer{}}
+	return &Runtime{dialer: &net.Dialer{}, now: time.Now, maintFirst: maintainFirst, maintEvery: maintainEvery}
 }
 
 func (r *Runtime) host() (pluginsdk.Host, error) {
@@ -152,8 +169,9 @@ func (r *Runtime) client(ctx context.Context) (*msbctl.Client, error) {
 	return msbctl.New(pool), nil
 }
 
-// Close drops every SSH connection.
+// Close stops the maintainer and drops every SSH connection.
 func (r *Runtime) Close() {
+	r.stopMaintainer()
 	r.keyMu.Lock()
 	defer r.keyMu.Unlock()
 	if r.pool != nil {

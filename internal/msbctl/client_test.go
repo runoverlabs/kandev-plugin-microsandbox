@@ -1,9 +1,12 @@
 package msbctl
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,10 +24,14 @@ type reply struct {
 type fakeRunner struct {
 	reply reply
 	argv  []string
+	stdin []byte
 }
 
-func (f *fakeRunner) Run(_ context.Context, _ hosts.Host, args []string, _ io.Reader) ([]byte, int, error) {
+func (f *fakeRunner) Run(_ context.Context, _ hosts.Host, args []string, stdin io.Reader) ([]byte, int, error) {
 	f.argv = args
+	if stdin != nil {
+		f.stdin, _ = io.ReadAll(stdin)
+	}
 	return []byte(f.reply.stdout), f.reply.status, f.reply.err
 }
 
@@ -111,4 +118,42 @@ func TestListDecodes(t *testing.T) {
 	assert.Equal(t, []string{"msbctl", "kandev", "list"}, runner.argv)
 	require.Len(t, list, 1)
 	assert.Equal(t, "k-env-1", list[0].Name)
+}
+
+func TestHealthReadsProxyAndTLS(t *testing.T) {
+	body := `{"protocol":1,"kvm":true,"enabled":true,
+ "serve":{"ok":true,"mode":"proxy","listen":"100.64.0.7","running":true},
+ "tls":{"installed":true,"subject":"sbx-01.tailnet.ts.net","not_after":"2027-01-17T00:00:00Z","issuer_sha256":"ab"}}`
+	health, err := New(&fakeRunner{reply: reply{stdout: body}}).Health(context.Background(), hosts.Host{})
+	require.NoError(t, err)
+	assert.Equal(t, ServeProxy, health.Serve.Mode)
+	assert.True(t, health.Serve.Running)
+	require.NotNil(t, health.TLS)
+	assert.Equal(t, "sbx-01.tailnet.ts.net", health.TLS.Subject)
+
+	health, err = New(&fakeRunner{reply: reply{stdout: healthy}}).Health(context.Background(), hosts.Host{})
+	require.NoError(t, err)
+	assert.Nil(t, health.TLS, "hosts without the proxy report no tls")
+}
+
+func TestTLSInstallSendsTheKeyOnStdinOnly(t *testing.T) {
+	const key = "-----BEGIN PRIVATE KEY-----\nplanted-key-material\n-----END PRIVATE KEY-----\n"
+	runner := &fakeRunner{reply: reply{stdout: `{"tls":{"installed":true,"subject":"sbx-01.tailnet.ts.net","not_after":"2027-01-17T00:00:00Z","issuer_sha256":"ab"}}`}}
+	status, err := New(runner).TLSInstall(context.Background(), hosts.Host{}, "CHAIN", key)
+	require.NoError(t, err)
+	assert.True(t, status.Installed)
+	assert.Equal(t, []string{"msbctl", "kandev", "tls", "install"}, runner.argv)
+	assert.NotContains(t, strings.Join(runner.argv, " "), "planted-key-material")
+
+	require.True(t, bytes.HasSuffix(runner.stdin, []byte("\n")))
+	assert.Equal(t, 1, bytes.Count(runner.stdin, []byte("\n")), "exactly one header line")
+	var header map[string]string
+	require.NoError(t, json.Unmarshal(runner.stdin, &header))
+	assert.Equal(t, key, header["key_pem"])
+	assert.Equal(t, "CHAIN", header["cert_pem"])
+
+	_, err = New(&fakeRunner{reply: reply{stdout: `{"error":{"code":"invalid_config"}}`, status: 3}}).TLSInstall(context.Background(), hosts.Host{}, "x", "y")
+	assert.Equal(t, CodeInvalidConfig, CodeOf(err))
+	_, err = New(&fakeRunner{reply: reply{stdout: `{}`}}).TLSInstall(context.Background(), hosts.Host{}, "x", "y")
+	assert.Equal(t, CodeUnavailable, CodeOf(err))
 }

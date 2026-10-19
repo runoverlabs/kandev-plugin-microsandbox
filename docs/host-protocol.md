@@ -116,6 +116,31 @@ sandboxes are never listed. `state` is `creating`, `running`, `stopped` or
 Used by: **Remove** on the Sandbox Hosts page, which refuses while a host
 still lists sandboxes.
 
+## Verbs the plugin calls ahead of the host
+
+The plugin already calls these, but msbctl has not built them yet (feature
+request F17 and F19). Until it has, a host never reports `serve.mode =
+"proxy"`, and the plugin never calls `tls install`.
+
+### `health` fields for `serve = "proxy"`
+
+```json
+"serve": {"ok": true, "mode": "proxy", "listen": "100.64.0.7", "running": true},
+"tls": {"installed": true, "subject": "sbx-01.tailnet.ts.net",
+        "not_after": "2027-01-17T00:00:00Z", "issuer_sha256": "<hex SHA-256 of the issuing root>"}
+```
+
+The plugin re-issues the certificate when `tls` is missing or not
+`installed`, when `issuer_sha256` is not its current root, when `subject` is
+not the host part of the registered `base_url`, or when `not_after` is less
+than 30 days away.
+
+### `msbctl kandev tls install`
+
+Stdin is one JSON header line, `{"cert_pem": "<leaf, then root>", "key_pem":
+"<PKCS#8 EC key>"}`. The answer is `{"tls": <the document above>}`. The key
+is sent once, on stdin, and is never in argv or any output.
+
 ## Verbs still to define
 
 `provision`, `agentctl`, `inspect`, `find`, `start`, `stop`, `expiry`,

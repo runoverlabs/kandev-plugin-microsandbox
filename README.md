@@ -24,6 +24,7 @@ install, driven over SSH through a restricted forced command
 | --- | --- |
 | Executor provider `microsandbox` | An executor profile type: placement, digest-pinned image, CPUs, memory, disk, lifetime, extra egress, environment, registry credentials and up to three host-bound secrets. Profiles are validated on save, including that the placement selects a registered, non-draining host. |
 | Sandbox host registry | Admin-only actions to list, scan (trust on first use), add, update, drain, remove and test hosts. A host that still has sandboxes cannot be removed. |
+| Root certificate | A name-constrained root the Kandev server trusts for sandbox hosts only; host certificates are issued and renewed automatically. |
 
 ## Requirements
 

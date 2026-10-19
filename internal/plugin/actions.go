@@ -54,6 +54,10 @@ func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionR
 		handler = r.actionRemove
 	case ActionHostsTest:
 		handler = r.actionTest
+	case ActionCAGet:
+		handler = r.actionCAGet
+	case ActionCACreate:
+		handler = r.actionCACreate
 	default:
 		return respond(fail(http.StatusNotFound, "unknown action")), nil
 	}
@@ -169,6 +173,9 @@ func (r *Runtime) actionAdd(ctx context.Context, body []byte) response {
 	if err := decode(body, &in); err != nil {
 		return fail(http.StatusUnprocessableEntity, "expected a host: name, ssh, host_key, base_url, labels")
 	}
+	if res, refused := r.refuseOutsideRoot(ctx, in); refused {
+		return res
+	}
 	return r.writeHost(ctx, ActionHostsAdd, in, func(reg hosts.Registry, h hosts.Host) (hosts.Registry, error) {
 		h.Draining = false
 		return reg.Add(h)
@@ -179,6 +186,9 @@ func (r *Runtime) actionUpdate(ctx context.Context, body []byte) response {
 	var in hosts.Host
 	if err := decode(body, &in); err != nil {
 		return fail(http.StatusUnprocessableEntity, "expected a host: name, ssh, host_key, base_url, labels")
+	}
+	if res, refused := r.refuseOutsideRoot(ctx, in); refused {
+		return res
 	}
 	return r.writeHost(ctx, ActionHostsUpdate, in, hosts.Registry.Update)
 }
@@ -199,7 +209,45 @@ func (r *Runtime) writeHost(ctx context.Context, action string, in hosts.Host, c
 	if action == ActionHostsAdd {
 		status = http.StatusCreated
 	}
-	return response{status, map[string]any{"host": viewOf(saved)}}
+	out := map[string]any{"host": viewOf(saved)}
+	if outcome, tried := r.healAfterWrite(ctx, saved); tried {
+		out["tls"] = outcome
+	}
+	return response{status, out}
+}
+
+// refuseOutsideRoot refuses a base URL no certificate from the root could
+// cover. Without a root there is nothing to check yet.
+func (r *Runtime) refuseOutsideRoot(ctx context.Context, in hosts.Host) (response, bool) {
+	root, err := r.root(ctx)
+	if err != nil {
+		return response{}, false
+	}
+	name := hostName(hosts.Normalize(in))
+	if name == "" || root.Permits(name) {
+		return response{}, false
+	}
+	return validationFailure(&hosts.ValidationError{Fields: []hosts.FieldError{{
+		Field:   "base_url",
+		Message: "outside the names the plugin's root may certify (" + strings.Join(root.Constraints().DNSSuffixes, ", ") + ")",
+	}}}), true
+}
+
+// healAfterWrite issues a certificate for a newly added or changed host,
+// best effort: the host is saved either way, and the maintainer retries.
+func (r *Runtime) healAfterWrite(ctx context.Context, h hosts.Host) (tlsOutcome, bool) {
+	if _, err := r.root(ctx); err != nil {
+		return tlsOutcome{}, false
+	}
+	client, err := r.client(ctx)
+	if err != nil {
+		return tlsOutcome{}, false
+	}
+	health, err := client.Health(ctx, h)
+	if err != nil {
+		return tlsOutcome{State: tlsFailed, Reason: "unreachable"}, true
+	}
+	return r.healTLS(ctx, client, h, health), true
 }
 
 func validationFailure(v *hosts.ValidationError) response {
@@ -298,6 +346,7 @@ type testResult struct {
 	Hint    string         `json:"hint,omitempty"`
 	Warning string         `json:"warning,omitempty"`
 	Health  *msbctl.Health `json:"health,omitempty"`
+	TLS     *tlsOutcome    `json:"tls,omitempty"`
 }
 
 func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
@@ -321,7 +370,21 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 	}
 	_, publicKey, _ := r.key(ctx)
 	health, err := client.Health(ctx, h)
+	var outcome tlsOutcome
+	if err == nil {
+		// Test heals before it reports: a host that only needed a new
+		// certificate passes rather than telling the operator to wait for
+		// the maintainer.
+		outcome = r.healTLS(ctx, client, h, health)
+		if outcome.State == tlsRenewed {
+			health, err = client.Health(ctx, h)
+		}
+	}
 	result := diagnose(health, err, publicKey)
+	if err == nil && health.Serve.Mode == msbctl.ServeProxy {
+		result.TLS = &outcome
+		r.diagnoseTLS(ctx, &result, outcome)
+	}
 	// Leases are built on the host's own base URL; one that differs from
 	// the registered URL means the operator's picture of the host is stale.
 	if err == nil && health.BaseURL != "" && strings.TrimRight(health.BaseURL, "/") != h.BaseURL {
@@ -351,8 +414,41 @@ func diagnose(health msbctl.Health, err error, publicKey string) testResult {
 		result.Problem, result.Hint = "disabled", "Set enabled = true under [kandev] in the host's msbctl config."
 	case !health.KVM:
 		result.Problem, result.Hint = "no_kvm", "/dev/kvm is not available on the host."
+	case !health.Serve.OK && health.Serve.Mode == msbctl.ServeProxy:
+		result.Problem, result.Hint = "no_data_path", "The host's TLS proxy is not running, has no certificate, or has no proxy_listen address in [kandev]."
 	case !health.Serve.OK:
 		result.Problem, result.Hint = "no_data_path", "Tailscale is not running with a DNS name on the host, so tailscale serve cannot publish sandboxes to Kandev."
 	}
 	return result
+}
+
+// diagnoseTLS adds what certificate care found to a proxy-mode result. A
+// host-side problem already found is kept, except no_data_path: a proxy
+// without a certificate reports exactly that, and the certificate problem
+// is its cause and the more useful thing to say.
+func (r *Runtime) diagnoseTLS(ctx context.Context, result *testResult, outcome tlsOutcome) {
+	set := func(problem, hint string) {
+		result.OK = false
+		if result.Problem == "" || result.Problem == "no_data_path" {
+			result.Problem, result.Hint = problem, hint
+		}
+	}
+	switch outcome.State {
+	case tlsNoRoot:
+		set("no_root", "Create the plugin's root certificate (ca.create), then install it on the Kandev server (ca.get).")
+		return
+	case tlsNotPermitted:
+		set("not_permitted", "The host's base_url is outside the names the root may certify. Register it under a permitted name, or create a new root that covers it.")
+		return
+	case tlsFailed:
+		set("tls_install_failed", "The host refused or did not accept a new certificate; it is retried automatically.")
+		return
+	}
+	root, err := r.root(ctx)
+	if err != nil {
+		return
+	}
+	if r.rootTrusted(root) != nil {
+		set("root_not_trusted", "The Kandev server does not trust the plugin's root yet. Install it (ca.get lists the steps) and restart Kandev.")
+	}
 }

@@ -6,6 +6,7 @@
 package msbctl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -97,14 +98,31 @@ type Health struct {
 	BaseURL       string         `json:"base_url"`
 	Capacity      hosts.Capacity `json:"capacity"`
 	Serve         ServeStatus    `json:"serve"`
+	// TLS is the proxy's installed certificate; absent on hosts that do not
+	// run serve = "proxy".
+	TLS *TLSStatus `json:"tls,omitempty"`
 }
 
 // ServeStatus reports whether the host's HTTPS data path is up. The host
 // also sends a `reason` when it is not; that is msbctl's text and is not
 // read, like every other message the host writes.
 type ServeStatus struct {
-	OK   bool   `json:"ok"`
-	Mode string `json:"mode"` // "tailscale" or "none"
+	OK      bool   `json:"ok"`
+	Mode    string `json:"mode"`              // "proxy", "tailscale" or "none"
+	Listen  string `json:"listen,omitempty"`  // proxy: the address its TLS ports bind
+	Running bool   `json:"running,omitempty"` // proxy: the service is up
+}
+
+// ServeProxy is the mode where msbctl terminates TLS itself, with a
+// certificate the plugin issues.
+const ServeProxy = "proxy"
+
+// TLSStatus is what a host reports about the proxy's certificate.
+type TLSStatus struct {
+	Installed    bool   `json:"installed"`
+	Subject      string `json:"subject"`
+	NotAfter     string `json:"not_after"`
+	IssuerSHA256 string `json:"issuer_sha256"`
 }
 
 // Usable reports whether a host can take new sandboxes at all, regardless
@@ -156,6 +174,26 @@ func (c *Client) List(ctx context.Context, h hosts.Host) ([]Sandbox, error) {
 		return nil, err
 	}
 	return out.Sandboxes, nil
+}
+
+// TLSInstall runs `msbctl kandev tls install`, sending the certificate chain
+// and its private key as one JSON header line on stdin. The key never
+// appears in argv, and the host never prints it back.
+func (c *Client) TLSInstall(ctx context.Context, h hosts.Host, chainPEM, keyPEM string) (TLSStatus, error) {
+	header, err := json.Marshal(map[string]string{"cert_pem": chainPEM, "key_pem": keyPEM})
+	if err != nil {
+		return TLSStatus{}, err
+	}
+	var out struct {
+		TLS *TLSStatus `json:"tls"`
+	}
+	if err := c.call(ctx, h, []string{"tls", "install"}, bytes.NewReader(append(header, '\n')), &out); err != nil {
+		return TLSStatus{}, err
+	}
+	if out.TLS == nil {
+		return TLSStatus{}, &Error{Code: CodeUnavailable}
+	}
+	return *out.TLS, nil
 }
 
 // call runs `msbctl kandev <args>` and decodes its one JSON document.

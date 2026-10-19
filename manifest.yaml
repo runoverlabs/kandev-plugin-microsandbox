@@ -23,7 +23,8 @@ runtime:
     darwin-arm64: "server/plugin-darwin-arm64"
     windows-amd64: "server/plugin-windows-amd64.exe"
 
-# state: the sandbox host registry. secrets: the plugin's SSH private key.
+# state: the sandbox host registry and the root certificate. secrets: the
+# plugin's SSH private key and the root's private key.
 # Changing this set invalidates the operator's approval for every capability;
 # internal/plugin/manifest_test.go pins it.
 capabilities:
@@ -31,8 +32,9 @@ capabilities:
   state: true
   secrets: true
 
-# The Sandbox Hosts actions. Every one is admin-only: the registry decides
-# where every workspace's sandboxes run, and hosts.scan dials out. `scope` is
+# The Sandbox Hosts and root certificate actions. Every one is admin-only:
+# the registry decides where every workspace's sandboxes run, hosts.scan
+# dials out, and the root is what the Kandev server trusts. `scope` is
 # required by the action contract; the registry itself is plugin-wide.
 actions:
   - key: "hosts.list"
@@ -63,6 +65,16 @@ actions:
     scope: "workspace"
     access: "admin"
     max_body_bytes: 1024
+  # The plugin's root certificate: the Kandev server trusts it for sandbox
+  # hosts only (it is name-constrained), and hosts' certificates come from it.
+  - key: "ca.get"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "ca.create"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 4096
 
 executor_providers:
   - key: "microsandbox"
