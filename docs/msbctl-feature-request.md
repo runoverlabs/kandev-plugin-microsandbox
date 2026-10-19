@@ -9,7 +9,7 @@ v0.3.0, which has none of this. This document now describes what was built;
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built on msb-manager branch `kandev-tls` (2026-10-19), not merged yet. It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
+**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and merged into msb-manager `main` (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19), not released yet. It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
 
@@ -44,7 +44,7 @@ As of 2026-10-17:
 | Live run | The whole lifecycle against real msb 0.7.7, nested in an msb sandbox: provision, agentctl, inspect, lease, stop/start with re-sent secrets, expiry, reap, destroy. No secret, password or nonce reached argv or disk. |
 | Spikes | `spikes/16-kandev-host.sh`: S1, S3, S4 (pinned address) and the registry check PASS nested. **S2 (`tailscale serve`) and S5 (round trips) not run yet**: they need a tailnet node and a remote (`SPIKE_TS=1`, `SPIKE_SSH_DEST`). S4 should be re-run on a real host. |
 | Docs | "Kandev hosts" page and a `msbctl kandev` section on the Commands page. |
-| F16–F19 | Built on branch `kandev-tls`. `tests/test_kandev_tls.py` runs real TLS on loopback against certificates `openssl` makes at test time (a name-constrained root and its leaves). An end-to-end run of the CLI, with `curl` as the client, gave 200 with a lease, 401 without one, and connection refused after `destroy`. Not yet run against real msb or from another machine; the 10-minute WebSocket idle check hasn't been run either. |
+| F16–F19 | Built and merged into `main`. `tests/test_kandev_tls.py` runs real TLS on loopback against certificates `openssl` makes at test time (a name-constrained root and its leaves). An end-to-end run of the CLI, with `curl` as the client, gave 200 with a lease, 401 without one, and connection refused after `destroy`. Not yet run against real msb or from another machine; the 10-minute WebSocket idle check hasn't been run either. |
 
 For the plugin:
 
@@ -55,7 +55,7 @@ For the plugin:
 - **The data path is the one open risk.** If S2 shows `tailscale serve`
   does not strip the `/vm/<name>/p/<port>` prefix or does not pass
   WebSocket upgrades, F10 switches to the fallback in the plan (a TLS
-  splice in msbctl), and leases gain a bearer token.
+  splice in msbctl), and leases gain a lease token (`X-Msb-Lease`).
 - **Open question 1** (agentctl after a VM restart) is still Kandev's to
   answer; see Open questions.
 
@@ -118,9 +118,10 @@ What the plugin has to adopt. Each one is also in place below.
 5. **`lease` in proxy mode answers `unavailable`** while `proxy_listen` is
    unset or no certificate is installed, as well as when the VM isn't running
    (F18).
-6. **Exactly one `Authorization` header.** Two, even if one is valid, get the
-   401. The header is forwarded to the guest unchanged with the rest of the
-   request: the proxy does not rewrite heads (F16).
+6. **Exactly one `X-Msb-Lease` header** (originally `Authorization`, fixed in
+   `dec3dd2`). Two, even if one is valid, get the 401. Every header,
+   `Authorization` included, is forwarded to the guest unchanged with the
+   rest of the request: the proxy does not rewrite heads (F16).
 7. **The proxy offers ALPN `http/1.1` only**, so Kandev's Go client never
    negotiates HTTP/2, which would carry many requests on one connection past
    the head check (F16).
@@ -139,50 +140,38 @@ What the plugin has to adopt. Each one is also in place below.
     restarts it, so re-running it after an upgrade picks up new code (F14,
     F16).
 
-### Plugin review of request 2 (2026-10-19): two blockers
+### Plugin review of request 2 (2026-10-19): two blockers, both fixed
 
-**Still present after [PR #62](https://github.com/runoverlabs/sandbox-manager/pull/62)
-was merged** (checked in its diff on 2026-10-19): `lease` returns
-`{"Authorization": "Bearer …"}`, and `kandev_token()` HMACs `name | guest port
-| generation | expiry`. Until both change, `serve = "proxy"` cannot work with
-Kandev; the plugin refuses such a lease with `unavailable` rather than hand
-Kandev one it would reject.
+The first build of request 2 sent the lease token as `Authorization: Bearer`
+and bound it to `generation`. Kandev v0.97.0 refuses a lease that sets
+`Authorization` (`normalizeLeaseHeaders` in
+`apps/backend/internal/agent/runtime/agentctl/endpoint_transport.go`), sets
+that header itself on every request for agentctl, and refreshes a lease only
+30 s before `expires_at`, never on a 401. So `serve = "proxy"` could not
+work, and a generation-bound token would have broken every VM restart for up
+to 10 minutes.
 
-Changes 1–5 and 7–11 are fine; the plugin already sends the leaf followed by
-the root, real subjectAltNames, an unencrypted PKCS#8 key, and reads
-`{"installed": false}`. **Change 6 and the token design in F18 must be
-reverted** to the version of F18 that was in this file before the update
-(commit `7d75521` of the plugin repo). Both points come from Kandev v0.97.0's
-own source, `apps/backend/internal/agent/runtime/agentctl/endpoint_transport.go`:
+**Fixed** in msb-manager `main`, commit `dec3dd2` (2026-10-19), checked in
+its diff:
 
-1. **The lease header cannot be `Authorization`.** `normalizeLeaseHeaders`
-   (around line 356) runs on both `http_headers` and `websocket_headers`, and
-   fails with `provider cannot override Authorization` for `Authorization`,
-   `X-Instance-ID`, `Host`, `Cookie`, `Set-Cookie`, `Sec-WebSocket-Protocol`,
-   any hop-by-hop header and any `Proxy-*` header. Kandev therefore refuses
-   **every** lease that carries the token as `Authorization`, before sending
-   a single request. Separately, `endpointRoundTripper.RoundTrip` sets
-   `Authorization: Bearer <agentctl token>` itself on every request, after
-   the lease headers (around line 534). That header belongs to agentctl,
-   which needs it to pass through to the guest unchanged.
-   **Required:** the proxy reads the lease token from **`X-Msb-Lease`**
-   (exactly one, value = the token) and ignores `Authorization`, which it
-   forwards untouched. `lease` returns `"headers": {"X-Msb-Lease": "v1.…"}`.
-2. **Tokens must not be bound to `generation`.** Kandev caches a lease and
-   refreshes it only 30 s before `expires_at` (`connectionLeaseManager`,
-   around lines 138–200). A 401 does **not** make it re-resolve. After
-   `start`, Kandev keeps sending the token it already holds until that
-   refresh, so a generation-bound token makes every VM restart fail for up
-   to 10 minutes. **Required:** bind the HMAC to `name | guest port |
-   created_at | valid_until` (the sandbox incarnation). Report `expires_at` =
-   now + 10 min but accept until `valid_until` = now + 15 min. Keep
-   `lease.key.prev` accepted for 15 min after a key change. The accept
-   criteria are the ones in the earlier F18: a token minted before
-   `stop`/`start` still works; after `destroy` + re-`provision` it does not.
+- `lease` returns `"headers": {"X-Msb-Lease": "v1.…"}`. The proxy reads
+  exactly one `X-Msb-Lease` header, never looks at `Authorization`, and
+  forwards every byte as it came, so agentctl's token reaches the guest
+  untouched.
+- The HMAC covers `name | guest port | incarnation | valid_until`. The
+  incarnation is the entry's `created_at` plus 8 random bytes drawn at
+  provision, a deviation from the request, which named `created_at` alone:
+  two provisions of one name can land in the same second, and an old token
+  would then work on the new sandbox. Only the host computes and checks the
+  token, so the plugin is unaffected and still treats it as opaque.
+- `expires_at` is now + 10 min; the token is accepted until `valid_until` =
+  now + 15 min, with 30 s of clock skew.
+- `host kandev rotate-lease-key` moves the key to `lease.key.prev`, accepted
+  for 15 min after the rotation. Rotating twice within 15 min drops the
+  older key.
 
-The plugin will not hand Kandev a lease that sets a header Kandev refuses: it
-checks `headers` against that list and answers `unavailable`, logging the
-cause, rather than letting the launch fail later with a generic error.
+The plugin still refuses any lease whose `headers` set a name Kandev refuses,
+answering `unavailable`, in case a host regresses.
 
 ## Milestones
 
@@ -195,7 +184,7 @@ Each milestone is independently useful and unblocks a plugin phase.
 | **M2: one session runs** | [F6](#f6-the-kandev-entry-kind) entry kind · [F7](#f7-kandev-provision) `provision` · [F8](#f8-kandev-agentctl) `agentctl` · [F9](#f9-kandev-inspect-and-kandev-find) `inspect` · [F10](#f10-kandev-lease-and-the-data-path) `lease` + serve mappings · [F11](#f11-kandev-destroy) `destroy` | A Kandev task launches, shows terminal, files, git and editor, and is cleaned up on archive |
 | **M3: it survives failure** | [F9](#f9-kandev-inspect-and-kandev-find) `find` · [F12](#f12-kandev-start-and-kandev-stop) `start`/`stop` · [F13](#f13-kandev-expiry) `expiry` · [F14](#f14-kandev-reap-and-host-kandev-install) `reap` + timer | Lost replies, Kandev restarts, host reboots, expiry |
 | **M4: docs** | [F15](#f15-documentation) "Kandev hosts" page | A new host in under 30 minutes from the docs |
-| **M5: host-side TLS** (request 2), built on branch `kandev-tls` | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
+| **M5: host-side TLS** (request 2), merged into `main` | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
 
 ## Constraints this must respect
 
@@ -789,11 +778,10 @@ terminates **on the sandbox host**, so traffic goes Kandev → host directly.
 What msbctl needs is below. The plugin owns the CA, key generation and
 renewal; msbctl stores the certificate and serves it.
 
-**Built** on msb-manager branch `kandev-tls`; the differences are in
-[Changes from request 2](#changes-from-request-2). **Two of them must be
-reverted before this can work with Kandev**; see
-[Plugin review of request 2](#plugin-review-of-request-2-2026-10-19-two-blockers).
-F18 below is the shape as built, which Kandev refuses.
+**Built** and merged into msb-manager `main`; the differences are in
+[Changes from request 2](#changes-from-request-2) and
+[Plugin review of request 2](#plugin-review-of-request-2-2026-10-19-two-blockers-both-fixed).
+F16 and F18 below are the shape as built after the lease-token fix.
 
 ### F16: `serve = "proxy"`, the TLS proxy
 
@@ -816,8 +804,9 @@ proxy_port_pool  = "30000-39999"    # public TLS ports, one per published guest 
   lease means a pooled connection can only ever reach one VM port, so there
   is **no HTTP parsing and no path routing**.
 - **Per connection:** complete the TLS handshake, then read the first
-  request head (cap 16 KiB, 10 s). Check its `Authorization: Bearer` token
-  ([F18](#f18-lease-tokens)) for *this* sandbox, guest port and generation.
+  request head (cap 16 KiB, 10 s). Check its one `X-Msb-Lease` token
+  ([F18](#f18-lease-tokens)) for *this* sandbox incarnation and guest port.
+  `Authorization` is never read and passes through untouched.
   On failure, answer a fixed `401` and close. On success, forward the bytes
   read so far, then splice both directions until either side closes.
   WebSocket upgrades and streaming need nothing special.
@@ -871,24 +860,29 @@ appears in argv or stdout.
   "base_url": "https://sbx-01.tailnet.ts.net:30001",
   "expires_at": "2026-10-19T12:10:00Z",
   "generation": "1",
-  "headers": {"Authorization": "Bearer v1.1792243800.…"}
+  "headers": {"X-Msb-Lease": "v1.1792244100.…"}
 }}
 ```
 
-- `token = "v1." + expiry_unix + "." + base64url(HMAC-SHA256(key, name | guest port | generation | expiry_unix))`.
-  The key is 32 random bytes in `STATE_DIR/kandev/lease.key` (0600),
-  created on first use.
+- `token = "v1." + valid_until + "." + base64url(HMAC-SHA256(key, name | guest port | incarnation | valid_until))`,
+  where incarnation is `created_at | <random value drawn at provision>` and
+  `valid_until` is `expires_at` + 5 min. The key is 32 random bytes in
+  `STATE_DIR/kandev/lease.key` (0600), created on first use.
 - These tokens are stateless: `lease` and the proxy share only the key
   file, so no IPC is needed, and a proxy restart invalidates nothing. The
-  proxy accepts a token until its expiry, with 30 s of clock skew. A
-  changed `generation` (a VM restart) invalidates older tokens.
+  proxy accepts a token until `valid_until`, with 30 s of clock skew, signed
+  with the current key or, for 15 min after `host kandev rotate-lease-key`,
+  the previous one. A stop and start keeps tokens valid; a destroy and
+  re-provision retires them.
+- Not `Authorization`: Kandev refuses a lease that sets it.
 - The plugin puts `headers` in both Kandev's `http_headers` and
   `websocket_headers`.
 - `kandev lease` output is now secret-bearing. The plugin treats it so;
   msbctl must not log it.
 
 **Accept:** a token for one sandbox or port is refused on another; a token
-past expiry is refused; after `start`, a token from the previous generation
+past expiry is refused; a token minted before `stop`/`start` still works; after
+`destroy` and a re-provision of the same name, even within one second, it
 is refused.
 
 ### F19: `health` reports TLS

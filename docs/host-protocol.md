@@ -144,11 +144,11 @@ refuses a `lease` whose `headers` include a name Kandev refuses in a lease
 (`Authorization`, `X-Instance-ID`, `Host`, `Cookie`, `Set-Cookie`,
 `Sec-WebSocket-Protocol`, hop-by-hop, `Proxy-*`), answering `unavailable`.
 
-## Verbs the plugin calls ahead of the host
+## TLS proxy hosts
 
-The plugin already calls these, but msbctl has not built them yet (feature
-request F17 and F19). Until it has, a host never reports `serve.mode =
-"proxy"`, and the plugin never calls `tls install`.
+For `serve = "proxy"` (feature request F16–F19, merged into msb-manager
+`main`), `health` reports the proxy and its certificate, and the plugin keeps
+the certificate current with `tls install`.
 
 ### `health` fields for `serve = "proxy"`
 
@@ -168,6 +168,14 @@ than 30 days away.
 Stdin is one JSON header line, `{"cert_pem": "<leaf, then root>", "key_pem":
 "<PKCS#8 EC key>"}`. The answer is `{"tls": <the document above>}`. The key
 is sent once, on stdin, and is never in argv or any output.
+
+### Lease tokens
+
+A proxy host's `lease` carries `"headers": {"X-Msb-Lease": "v1.…"}`. The
+plugin treats the token as opaque and secret, and puts it in both Kandev's
+`http_headers` and `websocket_headers`. Only the host computes and checks it:
+it is bound to the sandbox incarnation and guest port, so it survives a stop
+and start but not a re-provision.
 
 ## Verbs still to define
 
