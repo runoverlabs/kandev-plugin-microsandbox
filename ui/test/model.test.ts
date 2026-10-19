@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMiB, hostBadge, hostDetail, parseDestination, readinessTone, splitList, stepTone, type HostView } from "../src/model";
+import { formatMiB, hostBadge, olderVersion, hostDetail, parseDestination, readinessTone, splitList, stepTone, type HostView } from "../src/model";
 
 const base: HostView = {
   name: "sbx-01", ssh: "msb@sbx-01.example.com", host_key: "ssh-ed25519 AAAA", base_url: "https://sbx-01.example.com",
@@ -66,6 +66,13 @@ describe("helpers", () => {
     expect(parseDestination("root@[fd00::5]:22")).toEqual({ user: "root", host: "fd00::5", port: 22 });
     expect(parseDestination("nouser")).toBeNull();
     expect(parseDestination("u@host:99999")).toBeNull();
+  });
+
+  it("compares releases numerically", () => {
+    expect(olderVersion("0.5.1", "0.6.0")).toBe(true);
+    expect(olderVersion("0.6.0", "0.6.0")).toBe(false);
+    expect(olderVersion("0.10.0", "0.9.9")).toBe(false);
+    expect(olderVersion("", "0.6.0")).toBe(false);
   });
 
   it("maps states to tones", () => {

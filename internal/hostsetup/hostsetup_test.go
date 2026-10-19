@@ -3,6 +3,8 @@ package hostsetup
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -128,13 +130,8 @@ func (m *machine) Exec(_ context.Context, command string, stdin []byte) (sshx.Ou
 	case strings.Contains(script, msbctl.ManagerPin.SHA256):
 		m.manager = msbctl.ManagerPin.Version
 		return ok("")
-	case strings.Contains(script, "[kandev]"):
-		if strings.Contains(m.config, "[kandev]") {
-			return ok("present\n")
-		}
-		start := strings.Index(script, "[kandev]")
-		m.config += script[start : strings.Index(script[start:], "' >>")+start]
-		return ok("added\n")
+	case strings.Contains(script, "'configure'"):
+		return ok(m.configure(script))
 	case strings.Contains(script, "is-active --quiet msb-kandev-proxy"):
 		if m.servicesActive {
 			return ok("")
@@ -161,6 +158,65 @@ func (m *machine) Exec(_ context.Context, command string, stdin []byte) (sshx.Ou
 		return ok(m.health())
 	}
 	return exit(127, "unexpected script: "+script)
+}
+
+// configure applies `host kandev configure` flags to the fake's [kandev]
+// lines and answers as msbctl does: the keys it changed.
+func (m *machine) configure(script string) string {
+	var tokens []string
+	for _, match := range regexp.MustCompile(`'([^']*)'`).FindAllStringSubmatch(script, -1) {
+		tokens = append(tokens, match[1])
+	}
+	current := map[string]string{}
+	var order []string
+	for _, line := range strings.Split(m.config, "\n") {
+		if k, v, found := strings.Cut(line, " = "); found {
+			current[k] = v
+			order = append(order, k)
+		}
+	}
+	want := map[string]string{}
+	var extra []string
+	for i := 0; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "--enabled":
+			want["enabled"] = "true"
+		case "--serve":
+			want["serve"] = strconv.Quote(tokens[i+1])
+			i++
+		case "--proxy-listen":
+			want["proxy_listen"] = strconv.Quote(tokens[i+1])
+			i++
+		case "--base-url":
+			want["base_url"] = strconv.Quote(tokens[i+1])
+			i++
+		case "--allow-extra":
+			extra = append(extra, strconv.Quote(tokens[i+1]))
+			i++
+		}
+	}
+	if extra != nil {
+		want["allow_extra"] = "[" + strings.Join(extra, ", ") + "]"
+	}
+	var changed []string
+	for _, k := range []string{"enabled", "serve", "proxy_listen", "base_url", "allow_extra"} {
+		v, given := want[k]
+		if !given || current[k] == v {
+			continue
+		}
+		if _, had := current[k]; !had {
+			order = append(order, k)
+		}
+		current[k] = v
+		changed = append(changed, strconv.Quote(k))
+	}
+	var b strings.Builder
+	b.WriteString("[kandev]\n")
+	for _, k := range order {
+		fmt.Fprintf(&b, "%s = %s\n", k, current[k])
+	}
+	m.config = b.String()
+	return `{"changed": [` + strings.Join(changed, ", ") + `], "kandev": {}}`
 }
 
 func versionLine(name, v string) string {
@@ -232,7 +288,7 @@ func TestBootstrapSetsUpAFreshMachine(t *testing.T) {
 	assert.Contains(t, m.config, `base_url = "https://sbx-01.example.com"`)
 	assert.Contains(t, m.config, `allow_extra = ["*"]`)
 	assert.Equal(t, "sudo -n sh -s", m.ran("useradd")[0].command, "root's part goes through sudo")
-	for _, marker := range []string{msbctl.MsbPin.SHA256, msbctl.ManagerPin.SHA256, "[kandev]", "msbctl host authorize"} {
+	for _, marker := range []string{msbctl.MsbPin.SHA256, msbctl.ManagerPin.SHA256, "'configure'", "msbctl host authorize"} {
 		assert.Equal(t, "sudo -n -iu msb sh -s", m.ran(marker)[0].command, "%s runs as the account", marker)
 	}
 	require.Len(t, m.authorized, 1)
@@ -301,14 +357,28 @@ func TestBootstrapWithoutSudoListsRootsPart(t *testing.T) {
 	assert.Contains(t, res.Steps[1].Commands[0], "apt-get install -y -qq git")
 }
 
-func TestBootstrapReportsDriftInAnExistingSection(t *testing.T) {
+// configure (F23) changes only what setup sets, so an existing section is
+// repaired rather than reported.
+func TestBootstrapRepairsAnExistingSection(t *testing.T) {
 	m := ubuntu()
-	m.config = "[kandev]\nenabled = true\nserve = \"tailscale\"\nbase_url = \"https://old.example.com\"\n"
+	m.config = "[kandev]\nenabled = true\nserve = \"tailscale\"\nbase_url = \"https://old.example.com\"\nmax_sandboxes = 4\n"
 	res := Run(t.Context(), m, input(), nil)
-	assert.False(t, res.OK)
-	assert.Equal(t, StateOK, states(res)[StepConfig], "an existing section is kept")
-	assert.Equal(t, StateManual, states(res)[StepVerify])
-	assert.Equal(t, []string{`serve = "proxy"`, `base_url = "https://sbx-01.example.com"`, `allow_extra = ["*"]`}, res.Steps[9].Commands)
+	require.True(t, res.OK, "%+v", res.Steps)
+	assert.Equal(t, StateChanged, states(res)[StepConfig])
+	assert.Contains(t, res.Steps[5].Detail, "serve, proxy_listen, base_url, allow_extra")
+	assert.Contains(t, m.config, `base_url = "https://sbx-01.example.com"`)
+	assert.Contains(t, m.config, "max_sandboxes = 4", "keys setup does not set are kept")
+}
+
+// Without egress_from_plugin, setup leaves the host's allow_extra alone.
+func TestBootstrapLeavesAllowExtraUnlessAsked(t *testing.T) {
+	m := ubuntu()
+	m.config = "[kandev]\nallow_extra = [\"pypi.org\"]\n"
+	in := input()
+	in.EgressFromPlugin = false
+	require.True(t, Run(t.Context(), m, in, nil).OK)
+	assert.Contains(t, m.config, `allow_extra = ["pypi.org"]`)
+	assert.NotContains(t, m.ran("'configure'")[0].script, "--allow-extra")
 }
 
 func TestBootstrapShowsWhyAnInstallFailed(t *testing.T) {

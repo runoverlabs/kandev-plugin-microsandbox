@@ -1096,6 +1096,46 @@ Optionally `--version X` when `X` is not older than the running version.
 **Accept:** the kandev key runs `msbctl self-update --json` and gets the new
 version back; `msbctl self-update --version 0.4.0` from it is refused.
 
+**Built** and released in msb-manager
+[0.6.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.6.0),
+checked against its source (`3941d6d`):
+
+- F22: `health.host` with exactly the fields above; disk figures for the
+  filesystem holding `MSB_HOME` (`~/.microsandbox`); any unreadable field
+  left out. `health.features` is unchanged (`["workspace_disk"]`), so the
+  plugin reads F24 support from `msbctl_version`.
+- F23: `host kandev configure` with `--enabled/--no-enabled`, `--serve`,
+  `--proxy-listen`, `--base-url`, `--allow-extra` (repeatable; `''` empties
+  the list) and `--json`, which answers `{"changed": [...], "kandev": {...}}`.
+  Refused for both restricted keys, the plugin's included.
+- F24: `self-update --json` from the plugin's key answers
+  `{"msbctl_version", "updated"}`; `--version` only for the running release
+  or newer (an older one is refused by `host serve`, exit 126); `unsupported`
+  on a git checkout, `denied` with Kandev off.
+- The everyday key now takes the same forward-only `--version` rule. The
+  plugin has no stake in it; it cannot go backwards, so keeping it is fine.
+
+Verified on a real host (alloy, 2026-10-19): `configure` in a throwaway home
+(set five keys, then nothing on the second run, comments and other keys
+kept, `--proxy-listen sbx-01` refused with the file unchanged); through the
+plugin key's forced command, `self-update --json --version v0.6.0` answered
+`updated: false`, `--version v0.4.0` and `configure` were refused; Kandev's
+host list showed `health.host`.
+
+### Follow-ups from 0.6.0
+
+- **F25: restart the proxy after an update.** `self-update` switches
+  `current` but leaves `msb-kandev-proxy.service` running the old release
+  until someone restarts it on the host, which the plugin's key cannot do.
+  A `systemctl --user try-restart msb-kandev-proxy.service` after a
+  successful install (the reaper timer already starts fresh each minute)
+  would finish the update; it drops live data-path connections, which
+  Kandev re-establishes, so the plugin would rather call it when the host
+  has no sessions, if it were a separate verb (`kandev restart-proxy`).
+- **`get.sh --version 0.6.0`** puts the version into the release URL as
+  given, and releases are tagged `v0.6.0`, so the bare form 404s. The plugin
+  sends `v0.6.0`; accepting both in get.sh would remove the trap.
+
 ## Open questions
 
 1. **agentctl after a VM restart.** Does a restarted agentctl need a fresh

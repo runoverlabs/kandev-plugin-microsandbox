@@ -63,6 +63,8 @@ export interface HostView {
 }
 
 export interface HostList {
+  /** The msb-manager release setup installs and hosts.upgrade brings a host to. */
+  msbctl_release: string;
   public_key: string;
   authorize: string;
   hosts: HostView[];
@@ -249,4 +251,16 @@ export function parseDestination(raw: string): { user: string; host: string; por
   }
   if (!rest || !Number.isInteger(port) || port < 1 || port > 65535) return null;
   return { user, host: rest, port };
+}
+
+/** Whether release `have` (x.y.z) is older than `want`; unreadable is never older. */
+export function olderVersion(have: string, want: string): boolean {
+  const parse = (v: string) => v.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+  const h = parse(have);
+  const w = parse(want);
+  if (!h || !w) return false;
+  for (let i = 0; i < 3; i++) {
+    if (h[i] !== w[i]) return (h[i] ?? 0) < (w[i] ?? 0);
+  }
+  return false;
 }

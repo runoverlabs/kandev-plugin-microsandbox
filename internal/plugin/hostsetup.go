@@ -166,37 +166,69 @@ func (r *Runtime) actionSetup(ctx context.Context, body []byte) response {
 		return internalFailure(ActionHostsSetup, err)
 	}
 
-	r.jobs.mu.Lock()
-	r.jobs.init()
-	r.pruneJobs()
-	for _, job := range r.jobs.byID {
-		if job.Name == planned.Name && job.State == jobRunning {
-			r.jobs.mu.Unlock()
-			return fail(http.StatusConflict, "a setup of "+planned.Name+" is already running: job "+job.ID)
-		}
-	}
-	if r.jobs.ctx.Err() != nil {
-		r.jobs.mu.Unlock()
-		return fail(http.StatusServiceUnavailable, "the plugin is stopping")
-	}
-	id := newJobID()
-	job := &setupJob{ID: id, Name: planned.Name, State: jobRunning, Steps: plannedSteps(), StartedAt: r.now().UTC().Format(time.RFC3339)}
-	r.jobs.byID[id] = job
-	jobCtx, cancel := context.WithTimeout(r.jobs.ctx, setupTimeout)
-	r.jobs.wg.Add(1)
-	r.jobs.mu.Unlock()
-
 	input := hostsetup.Input{
 		PublicKey: publicKey, SSHHost: sshHost, SSHPort: sshPort, BaseURL: in.BaseURL,
 		Account: in.Account, EgressFromPlugin: in.EgressFromPlugin, KandevAddress: in.KandevAddress,
 	}
+	adminDest := strings.TrimSpace(in.SSH)
+	id, res := r.startJob(planned.Name, plannedSteps(), setupTimeout, func(ctx context.Context, id string) {
+		r.runSetup(ctx, id, adminDest, planned, auth, input)
+	})
+	if id == "" {
+		return res
+	}
+	snapshot, _ := r.jobs.snapshot(id)
+	return response{http.StatusAccepted, snapshot}
+}
+
+// startJob runs fn as a job for host name, at most one running per host:
+// setup and upgrade both change it. It returns the job id, or "" and the
+// response refusing it.
+func (r *Runtime) startJob(name string, steps []hostsetup.Step, timeout time.Duration, fn func(ctx context.Context, id string)) (string, response) {
+	r.jobs.mu.Lock()
+	r.jobs.init()
+	r.pruneJobs()
+	for _, job := range r.jobs.byID {
+		if job.Name == name && job.State == jobRunning {
+			r.jobs.mu.Unlock()
+			return "", fail(http.StatusConflict, "a job for "+name+" is already running: "+job.ID)
+		}
+	}
+	if r.jobs.ctx.Err() != nil {
+		r.jobs.mu.Unlock()
+		return "", fail(http.StatusServiceUnavailable, "the plugin is stopping")
+	}
+	id := newJobID()
+	r.jobs.byID[id] = &setupJob{ID: id, Name: name, State: jobRunning, Steps: steps, StartedAt: r.now().UTC().Format(time.RFC3339)}
+	jobCtx, cancel := context.WithTimeout(r.jobs.ctx, timeout)
+	r.jobs.wg.Add(1)
+	r.jobs.mu.Unlock()
 	go func() {
 		defer r.jobs.wg.Done()
 		defer cancel()
-		r.runSetup(jobCtx, id, strings.TrimSpace(in.SSH), planned, auth, input)
+		fn(jobCtx, id)
 	}()
-	snapshot, _ := r.jobs.snapshot(id)
-	return response{http.StatusAccepted, snapshot}
+	return id, response{}
+}
+
+func (r *Runtime) setJobStep(id, key, state, detail string) {
+	r.jobs.update(id, func(j *setupJob) {
+		for i := range j.Steps {
+			if j.Steps[i].Key == key {
+				j.Steps[i].State, j.Steps[i].Detail = state, detail
+			}
+		}
+	})
+}
+
+func (r *Runtime) finishJob(id, state string, change func(*setupJob)) {
+	r.jobs.update(id, func(j *setupJob) {
+		if change != nil {
+			change(j)
+		}
+		j.State, j.finished = state, r.now()
+		j.FinishedAt = j.finished.UTC().Format(time.RFC3339)
+	})
 }
 
 func bracketHost(host string, port int) string {
@@ -238,24 +270,8 @@ func (r *Runtime) pruneJobs() {
 // runSetup is the job: set the machine up over the admin login, drop
 // the login, then register the host and test it with the plugin's own key.
 func (r *Runtime) runSetup(ctx context.Context, id, adminDest string, planned hosts.Host, auth sshx.AdminAuth, input hostsetup.Input) {
-	finish := func(state string, change func(*setupJob)) {
-		r.jobs.update(id, func(j *setupJob) {
-			if change != nil {
-				change(j)
-			}
-			j.State, j.finished = state, r.now()
-			j.FinishedAt = j.finished.UTC().Format(time.RFC3339)
-		})
-	}
-	setStep := func(key, state, detail string) {
-		r.jobs.update(id, func(j *setupJob) {
-			for i := range j.Steps {
-				if j.Steps[i].Key == key {
-					j.Steps[i].State, j.Steps[i].Detail = state, detail
-				}
-			}
-		})
-	}
+	finish := func(state string, change func(*setupJob)) { r.finishJob(id, state, change) }
+	setStep := func(key, state, detail string) { r.setJobStep(id, key, state, detail) }
 	admin, err := sshx.DialAdmin(ctx, r.dialer, adminDest, planned.HostKey, auth)
 	auth = sshx.AdminAuth{}
 	if err != nil {

@@ -63,6 +63,8 @@ func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionR
 		handler = r.actionCACreate
 	case ActionHostsSetup:
 		handler = r.actionSetup
+	case ActionHostsUpgrade:
+		handler = r.actionUpgrade
 	case ActionHostsSetupStatus:
 		handler = r.actionSetupJobStatus
 	case ActionSecretsList:
@@ -168,9 +170,11 @@ func (r *Runtime) actionList(ctx context.Context, body []byte) response {
 		views = append(views, view)
 	}
 	return ok(map[string]any{
-		"public_key": publicKey,
-		"authorize":  authorizeCommand(publicKey),
-		"hosts":      views,
+		// The release hosts.setup installs and hosts.upgrade brings a host to.
+		"msbctl_release": msbctl.ManagerPin.Version,
+		"public_key":     publicKey,
+		"authorize":      authorizeCommand(publicKey),
+		"hosts":          views,
 	})
 }
 

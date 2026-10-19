@@ -27,7 +27,8 @@ workspace as the action scope).
 | `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. |
 | `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. The result becomes the host's `status`. |
 | `hosts.setup` | below | Sets up a bare machine over an admin login and registers it: [Setting up a new machine](#setting-up-a-new-machine). Returns 202 with a job. |
-| `hosts.setup.status` | `{"id": "..."}` | A setup job's steps so far. Jobs live in memory, for an hour after they finish. |
+| `hosts.upgrade` | `{"name": "..."}` | Updates the host's msb-manager to the release `hosts.setup` installs (0.6.0), through the plugin's own key, then runs Test. Needs msb-manager 0.6.0 or newer on the host already; older hosts take `hosts.setup` once. Returns 202 with a job. |
+| `hosts.setup.status` | `{"id": "..."}` | A setup or upgrade job's steps so far. Jobs live in memory, for an hour after they finish. |
 | `setup.status` | `{}` | The Kandev server's own one-time setup, item by item (below), each with what to do when it is not ready. |
 
 A host:
@@ -143,8 +144,8 @@ The steps, each reported `ok`, `changed`, `manual`, `failed` or `skipped`:
 | `probe` | Linux on x86_64 or aarch64, `/dev/kvm` present (else it stops: on EC2 use a `.metal` instance type), and whether the login has passwordless sudo. |
 | `packages` | Installs python3 (3.11+ is required), git, curl and tar with apt or dnf, and `dbus-user-session` on Debian and Ubuntu. |
 | `account` | Creates the `msb` account (no sudo, 0700 home), adds it to `/dev/kvm`'s group, and enables lingering so its user services run without a login. |
-| `msb`, `msb-manager` | Installs msb 0.7.7 and msb-manager 0.5.1 from their own installers, each pinned by sha256; never downgrades. |
-| `config` | Appends `[kandev]` to msbctl's `config.toml`: `serve = "proxy"`, `proxy_listen` on the machine's own address for the connection, `base_url`. An existing section is left alone (see `verify`). |
+| `msb`, `msb-manager` | Installs msb 0.7.7 and msb-manager 0.6.0 from their own installers, each pinned by sha256; never downgrades. |
+| `config` | `msbctl host kandev configure`: `enabled`, `serve = "proxy"`, `proxy_listen` on the machine's own address for the connection, `base_url`, and `allow_extra = ["*"]` when asked. Other keys and comments are kept; a refused value changes nothing. |
 | `services` | `msbctl host kandev install` (the TLS proxy and the reaper), only when something changed or a service is down. |
 | `firewall` | With firewalld or ufw active, opens TCP 30000–39999 to the Kandev server's address only. |
 | `authorize` | `msbctl host authorize '<plugin key>' --kandev --replace` for the account. |

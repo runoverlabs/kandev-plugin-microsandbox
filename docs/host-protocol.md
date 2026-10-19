@@ -120,6 +120,20 @@ Used by: placement, the Sandbox Hosts page's **Test**, and the maintainer,
 which checks every host every 15 minutes and keeps the result for the host
 list.
 
+### `msbctl self-update --json --version vX.Y.Z`
+
+msb-manager 0.6.0 (F24). Installs that release through the host's own
+`get.sh` and answers `{"msbctl_version": "0.6.0", "updated": true}`, the
+version now installed. The plugin sends the tag form (`v0.6.0`): `get.sh`
+builds the release URL from it unchanged. An older release is refused by
+`host serve` (exit 126); a git checkout answers `unsupported`; a host with
+Kandev off answers `denied`. The installer's output goes to stderr, which is
+not read. The running TLS proxy keeps the old release until it is restarted
+on the host.
+
+Used by: `hosts.upgrade`, only for hosts whose `msbctl_version` is 0.6.0 or
+newer and older than the release the plugin installs.
+
 ### `msbctl ls --json`
 
 Inventory goes through msbctl's generic verbs, which under the plugin's key

@@ -1,6 +1,8 @@
 package msbctl
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -8,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"kandev-plugin-microsandbox/internal/hosts"
 )
 
 // Host setup: how msb-manager and msb are installed and configured on a
@@ -33,9 +37,11 @@ var (
 		URL:     "https://github.com/superradcompany/microsandbox/releases/download/v0.7.7/install.sh",
 		SHA256:  "767df6954e09fec9bf8276cc2858fc9038024b3a22fa4740572620370eb719f4",
 	}
+	// 0.6.0 is the first with `host kandev configure` (F23), which setup
+	// writes [kandev] with. Its get.sh is byte-identical to 0.5.1's.
 	ManagerPin = Pin{
-		Version: "0.5.1",
-		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.5.1/get.sh",
+		Version: "0.6.0",
+		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.6.0/get.sh",
 		SHA256:  "a676bee14708d60a48f337602608674986cdb4da11c2494ac4e758130894151d",
 	}
 )
@@ -164,41 +170,37 @@ func (c KandevConfig) check() error {
 	return nil
 }
 
-// ConfigSection is the TOML section for c.
-func ConfigSection(c KandevConfig) (string, error) {
+// ConfigureScript sets the [kandev] keys in c with `msbctl host kandev
+// configure` (msb-manager 0.6.0, F23), which edits config.toml in place,
+// keeps every other key and comment, checks the result as every verb does at
+// load, and writes nothing when it would be refused. Keys c does not name
+// are left as they are; AllowExtra nil leaves allow_extra alone.
+func ConfigureScript(c KandevConfig) (string, error) {
 	if err := c.check(); err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	b.WriteString("[kandev]\n# Written by the Kandev microsandbox plugin's host setup.\n")
-	b.WriteString("enabled = true\nserve = \"proxy\"\n")
-	fmt.Fprintf(&b, "proxy_listen = %q\nbase_url = %q\n", c.ProxyListen, c.BaseURL)
-	if c.AllowExtra != nil {
-		quoted := make([]string, len(c.AllowExtra))
-		for i, e := range c.AllowExtra {
-			quoted[i] = strconv.Quote(e)
-		}
-		fmt.Fprintf(&b, "allow_extra = [%s]\n", strings.Join(quoted, ", "))
+	args := []string{"msbctl", "host", "kandev", "configure", "--enabled", "--serve", "proxy",
+		"--proxy-listen", c.ProxyListen, "--base-url", c.BaseURL}
+	for _, e := range c.AllowExtra {
+		args = append(args, "--allow-extra", e)
 	}
-	return b.String(), nil
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuote(a)
+	}
+	return "set -eu\n" + strings.Join(quoted, " ") + " --json </dev/null\n", nil
 }
 
-// ConfigureScript appends the [kandev] section to msbctl's config.toml when
-// it has none, printing "added", and otherwise changes nothing and prints
-// "present": an existing section is the operator's, and editing TOML from a
-// shell is not safe (feature request F23 asks msbctl for a writer).
-func ConfigureScript(c KandevConfig) (string, error) {
-	section, err := ConfigSection(c)
-	if err != nil {
-		return "", err
+// ParseConfigure reads configure's answer: the keys it changed.
+func ParseConfigure(stdout []byte) ([]string, error) {
+	var out struct {
+		Changed []string        `json:"changed"`
+		Kandev  json.RawMessage `json:"kandev"`
 	}
-	return `set -eu
-cfg="${MSB_CONFIG_DIR:-$HOME/.config/msb}/config.toml"
-mkdir -p "$(dirname "$cfg")"
-if grep -q '^\[kandev\]' "$cfg" 2>/dev/null; then echo present; exit 0; fi
-printf '\n%s' ` + shellQuote(section) + ` >> "$cfg"
-echo added
-`, nil
+	if err := json.Unmarshal(stdout, &out); err != nil || out.Kandev == nil {
+		return nil, ErrConfig
+	}
+	return out.Changed, nil
 }
 
 // ServicesScript installs the proxy and reaper user services. It restarts
@@ -221,3 +223,40 @@ func AuthorizeScript(publicKey string) string {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'" }
+
+// SelfUpdateVersion is the first msb-manager whose `self-update --json` the
+// plugin's key may run (F24). Its health lists no feature for it, so the
+// version tells.
+const SelfUpdateVersion = "0.6.0"
+
+// CanSelfUpdate reports whether the host's msbctl takes self-update from the
+// plugin's key.
+func (h Health) CanSelfUpdate() bool {
+	return h.MsbctlVersion != "" && !Older(h.MsbctlVersion, SelfUpdateVersion)
+}
+
+// Updated is self-update's answer.
+type Updated struct {
+	MsbctlVersion string `json:"msbctl_version"`
+	Updated       bool   `json:"updated"`
+}
+
+// SelfUpdate runs `msbctl self-update --json --version V` through the
+// plugin's key. msbctl refuses a V older than the running release (denied,
+// or the forced command's refusal), answers unsupported on a git checkout,
+// and denied when Kandev is turned off. The installer's output goes to
+// stderr, which is never read.
+func (c *Client) SelfUpdate(ctx context.Context, h hosts.Host, version string) (Updated, error) {
+	var out Updated
+	// As a tag: get.sh puts the version into the release URL unchanged, and
+	// releases are tagged v0.6.0. msbctl's own check takes either form.
+	tag := "v" + strings.TrimPrefix(version, "v")
+	if err := c.generic(ctx, h, []string{"self-update", "--json", "--version", tag}, &out); err != nil {
+		return Updated{}, err
+	}
+	if out.MsbctlVersion == "" {
+		return Updated{}, &Error{Code: CodeUnavailable}
+	}
+	out.MsbctlVersion = reportedText(out.MsbctlVersion)
+	return out, nil
+}

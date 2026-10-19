@@ -122,7 +122,7 @@ func Steps() []Step {
 		{Key: StepAccount, Title: "Prepare the account msb-manager runs under: KVM access, lingering user services"},
 		{Key: StepMsb, Title: "Install msb " + msbctl.MsbPin.Version},
 		{Key: StepManager, Title: "Install msb-manager " + msbctl.ManagerPin.Version},
-		{Key: StepConfig, Title: "Write msbctl's [kandev] section"},
+		{Key: StepConfig, Title: "Set msbctl's [kandev] section"},
 		{Key: StepServices, Title: "Run the TLS proxy and the reaper"},
 		{Key: StepFirewall, Title: "Open the proxy ports " + msbctl.ProxyPorts + " to the Kandev server"},
 		{Key: StepAuthorize, Title: "Authorize the plugin's SSH key for msbctl kandev only"},
@@ -555,15 +555,20 @@ func (r *run) configure(ctx context.Context) (bool, bool) {
 	}
 	out, err := r.asAccount(ctx, script)
 	if err != nil || out.Exit != 0 {
-		r.failed(StepConfig, "Writing msbctl's config failed.", out, err)
+		r.failed(StepConfig, "msbctl refused the [kandev] settings; config.toml is unchanged.", out, err)
 		return false, false
 	}
-	if strings.TrimSpace(string(out.Stdout)) == "added" {
-		r.set(StepConfig, StateChanged, "Added [kandev]: the TLS proxy on "+c.ProxyListen+", base URL "+c.BaseURL+".")
-		return true, true
+	changed, err := msbctl.ParseConfigure(out.Stdout)
+	if err != nil {
+		r.set(StepConfig, StateFailed, "msbctl host kandev configure gave no answer it could read.")
+		return false, false
 	}
-	r.set(StepConfig, StateOK, "A [kandev] section exists and is kept as it is; the last step compares it with what this setup would write.")
-	return false, true
+	if len(changed) == 0 {
+		r.set(StepConfig, StateOK, "[kandev] already has the TLS proxy on "+c.ProxyListen+" and base URL "+c.BaseURL+".")
+		return false, true
+	}
+	r.set(StepConfig, StateChanged, "Set "+strings.Join(changed, ", ")+" under [kandev]: the TLS proxy on "+c.ProxyListen+", base URL "+c.BaseURL+".")
+	return true, true
 }
 
 func (r *run) services(ctx context.Context, changed bool) bool {
@@ -644,7 +649,7 @@ func (r *run) authorize(ctx context.Context) bool {
 }
 
 // verify reads the host's health as the account and compares it with what
-// this setup would write. The data path may still be down: the plugin
+// this setup set. The data path may still be down: the plugin
 // issues the proxy's certificate after registering the host.
 func (r *run) verify(ctx context.Context) {
 	health, err := msbctl.New(accountRunner{r}).Health(ctx, hosts.Host{})
@@ -674,7 +679,7 @@ func (r *run) verify(ctx context.Context) {
 		return
 	}
 	if len(drift) > 0 {
-		r.set(StepVerify, StateManual, "The existing [kandev] section differs from this setup. Set these under [kandev] in ~"+r.account+"/.config/msb/config.toml, then run setup again:", drift...)
+		r.set(StepVerify, StateManual, "The host's health report disagrees with what setup set. Check these under [kandev] in ~"+r.account+"/.config/msb/config.toml:", drift...)
 		return
 	}
 	r.set(StepVerify, StateOK, "msbctl "+health.MsbctlVersion+" and msb "+health.MsbVersion+" report this host ready for Kandev.")

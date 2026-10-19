@@ -5,6 +5,7 @@ import { createReadinessPanel } from "./overview";
 import {
   hostBadge,
   hostDetail,
+  olderVersion,
   parseDestination,
   splitList,
   stepTone,
@@ -19,12 +20,14 @@ const POLL_MS = 1500;
 
 export function createHostsPage(host: PluginHostApi): Component {
   const k = kit(host);
+  JobView = createJobView(host);
   const Readiness = createReadinessPanel(host);
   const Setup = createSetupForm(host);
   const AddExisting = createAddExistingForm(host);
 
-  function Row(props: { h: HostView; onChanged: () => void }) {
+  function Row(props: { h: HostView; release: string; onChanged: () => void }) {
     const { h } = props;
+    const [upgrade, setUpgrade] = host.React.useState<SetupJob | null>(null);
     const [open, setOpen] = host.React.useState(false);
     const [test, setTest] = host.React.useState<TestResult | null>(null);
     const m = useMutation(host);
@@ -45,6 +48,12 @@ export function createHostsPage(host: PluginHostApi): Component {
       if (!window.confirm(`Remove ${h.name} from the plugin? Its sandboxes must be gone first.`)) return;
       if (await m.run("remove", "hosts.remove", { name: h.name, force: false })) props.onChanged();
     };
+    const startUpgrade = async () => {
+      const job = await m.run<SetupJob>("upgrade", "hosts.upgrade", { name: h.name });
+      if (job) setUpgrade(job);
+    };
+    const version = h.status?.health?.msbctl_version;
+    const behind = version !== undefined && olderVersion(version, props.release);
     const shown = test ?? h.status ?? null;
     return k.h(
       "div",
@@ -62,11 +71,17 @@ export function createHostsPage(host: PluginHostApi): Component {
           "span",
           { className: "msb-host__actions" },
           k.button(m.busy === "test" ? "Testing..." : "Test", () => void runTest(), { disabled: m.busy !== null, testId: `test-${h.name}` }),
+          behind
+            ? k.button(`Update to ${props.release}`, () => void startUpgrade(), { disabled: m.busy !== null || upgrade?.state === "running", testId: `upgrade-${h.name}` })
+            : null,
           k.button(h.draining ? "Undrain" : "Drain", () => void drain(), { disabled: m.busy !== null }),
           k.button("Remove", () => void remove(), { variant: "ghost", disabled: m.busy !== null }),
         ),
       ),
       k.error(m.error),
+      upgrade
+        ? k.h(JobView, { job: upgrade, title: `Updating ${h.name}`, onFinished: props.onChanged, onClose: () => setUpgrade(null) })
+        : null,
       open
         ? k.h(
             "div",
@@ -103,7 +118,7 @@ export function createHostsPage(host: PluginHostApi): Component {
         "Each host's last check, by Test or by the plugin every 15 minutes.",
         k.error(list.error),
         hosts.length === 0 && list.data ? k.h("p", { className: "msb-muted" }, "No sandbox host yet.") : null,
-        ...hosts.map((h) => k.h(Row, { key: h.name, h, onChanged: list.reload })),
+        ...hosts.map((h) => k.h(Row, { key: h.name, h, release: list.data?.msbctl_release ?? "", onChanged: list.reload })),
         k.h(
           "div",
           { className: "msb-row" },
@@ -159,6 +174,69 @@ function scanBlock(k: ReturnType<typeof kit>, s: ReturnType<typeof useScan>, des
   );
 }
 
+interface JobViewProps {
+  job: SetupJob;
+  title: string;
+  onFinished(): void;
+  onAgain?: () => void;
+  onClose(): void;
+}
+
+/** A setup or upgrade job's steps, followed until it finishes. */
+function createJobView(host: PluginHostApi): Component<JobViewProps> {
+  const k = kit(host);
+  return function JobView(props: JobViewProps) {
+    const [job, setJob] = host.React.useState<SetupJob>(props.job);
+    const [error, setError] = host.React.useState<ActionError | null>(null);
+    host.React.useEffect(() => {
+      if (job.state !== "running") return;
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => {
+        invoke<SetupJob>(host, "hosts.setup.status", { id: job.id }, controller.signal)
+          .then((next) => {
+            setJob(next);
+            if (next.state !== "running") props.onFinished();
+          })
+          .catch((cause: unknown) => {
+            if (!controller.signal.aborted) setError(toActionError(cause));
+          });
+      }, POLL_MS);
+      return () => {
+        window.clearTimeout(timer);
+        controller.abort();
+      };
+    }, [job]);
+    return k.card(
+      props.title,
+      job.state === "running" ? "Running. This can take a few minutes." : job.state === "done" ? "Done." : "Stopped. Fix what the failed step says, then run it again: every step is safe to repeat.",
+      k.error(error),
+      k.h(
+        "ol",
+        { className: "msb-checklist" },
+        ...job.steps.map((step) =>
+          k.h(
+            "li",
+            { key: step.key, className: "msb-checklist__item", "data-testid": `step-${step.key}` },
+            k.h("div", { className: "msb-row" }, k.badge(stepTone(step.state), step.state), k.h("span", null, step.title)),
+            step.detail ? k.h("p", { className: "msb-muted" }, step.detail) : null,
+            step.commands?.length ? k.code(step.commands.join("\n")) : null,
+            step.output ? k.code(step.output) : null,
+          ),
+        ),
+      ),
+      job.manual?.length ? k.h("div", null, k.h("strong", null, "Still to do:"), k.h("ul", null, ...job.manual.map((m, i) => k.h("li", { key: i }, m)))) : null,
+      k.h(
+        "div",
+        { className: "msb-row" },
+        job.state !== "running" && props.onAgain ? k.button("Run it again", props.onAgain) : null,
+        k.button("Close", props.onClose, { variant: "ghost" }),
+      ),
+    );
+  };
+}
+
+let JobView: Component<JobViewProps>;
+
 function createSetupForm(host: PluginHostApi): Component<{ onDone(): void; onCancel(): void }> {
   const k = kit(host);
   return function SetupForm(props: { onDone(): void; onCancel(): void }) {
@@ -175,25 +253,6 @@ function createSetupForm(host: PluginHostApi): Component<{ onDone(): void; onCan
     const [job, setJob] = host.React.useState<SetupJob | null>(null);
     const [error, setError] = host.React.useState<ActionError | null>(null);
     const s = useScan(host);
-
-    host.React.useEffect(() => {
-      if (!job || job.state !== "running") return;
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => {
-        invoke<SetupJob>(host, "hosts.setup.status", { id: job.id }, controller.signal)
-          .then((next) => {
-            setJob(next);
-            if (next.state !== "running") props.onDone();
-          })
-          .catch((cause: unknown) => {
-            if (!controller.signal.aborted) setError(toActionError(cause));
-          });
-      }, POLL_MS);
-      return () => {
-        window.clearTimeout(timer);
-        controller.abort();
-      };
-    }, [job]);
 
     const start = async () => {
       setError(null);
@@ -226,32 +285,16 @@ function createSetupForm(host: PluginHostApi): Component<{ onDone(): void; onCan
 
     const ready = s.confirmed && s.scanned?.dest === dest && name.trim() !== "" && (mode === "key" ? key.trim() !== "" : password !== "");
     if (job) {
-      return k.card(
-        `Setting up ${job.name}`,
-        job.state === "running" ? "Running. This takes a few minutes on a fresh machine." : job.state === "done" ? "Done." : "Stopped. Fix what the failed step says, then run it again: every step is safe to repeat.",
-        k.error(error),
-        k.h(
-          "ol",
-          { className: "msb-checklist" },
-          ...job.steps.map((step) =>
-            k.h(
-              "li",
-              { key: step.key, className: "msb-checklist__item", "data-testid": `step-${step.key}` },
-              k.h("div", { className: "msb-row" }, k.badge(stepTone(step.state), step.state), k.h("span", null, step.title)),
-              step.detail ? k.h("p", { className: "msb-muted" }, step.detail) : null,
-              step.commands?.length ? k.code(step.commands.join("\n")) : null,
-              step.output ? k.code(step.output) : null,
-            ),
-          ),
-        ),
-        job.manual?.length ? k.h("div", null, k.h("strong", null, "Still to do outside the machine:"), k.h("ul", null, ...job.manual.map((m, i) => k.h("li", { key: i }, m)))) : null,
-        k.h(
-          "div",
-          { className: "msb-row" },
-          job.state !== "running" ? k.button("Run it again", () => { setJob(null); s.setConfirmed(true); }) : null,
-          k.button("Close", props.onCancel, { variant: "ghost" }),
-        ),
-      );
+      return k.h(JobView, {
+        job,
+        title: `Setting up ${job.name}`,
+        onFinished: props.onDone,
+        onAgain: () => {
+          setJob(null);
+          s.setConfirmed(true);
+        },
+        onClose: props.onCancel,
+      });
     }
     return k.card(
       "Set up a new machine",
