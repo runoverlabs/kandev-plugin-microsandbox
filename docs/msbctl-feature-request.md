@@ -138,6 +138,44 @@ What the plugin has to adopt. Each one is also in place below.
     restarts it, so re-running it after an upgrade picks up new code (F14,
     F16).
 
+### Plugin review of request 2 (2026-10-19): two blockers
+
+Changes 1–5 and 7–11 are fine; the plugin already sends the leaf followed by
+the root, real subjectAltNames, an unencrypted PKCS#8 key, and reads
+`{"installed": false}`. **Change 6 and the token design in F18 must be
+reverted** to the version of F18 that was in this file before the update
+(commit `7d75521` of the plugin repo). Both points come from Kandev v0.97.0's
+own source, `apps/backend/internal/agent/runtime/agentctl/endpoint_transport.go`:
+
+1. **The lease header cannot be `Authorization`.** `normalizeLeaseHeaders`
+   (around line 356) runs on both `http_headers` and `websocket_headers`, and
+   fails with `provider cannot override Authorization` for `Authorization`,
+   `X-Instance-ID`, `Host`, `Cookie`, `Set-Cookie`, `Sec-WebSocket-Protocol`,
+   any hop-by-hop header and any `Proxy-*` header. Kandev therefore refuses
+   **every** lease that carries the token as `Authorization`, before sending
+   a single request. Separately, `endpointRoundTripper.RoundTrip` sets
+   `Authorization: Bearer <agentctl token>` itself on every request, after
+   the lease headers (around line 534). That header belongs to agentctl,
+   which needs it to pass through to the guest unchanged.
+   **Required:** the proxy reads the lease token from **`X-Msb-Lease`**
+   (exactly one, value = the token) and ignores `Authorization`, which it
+   forwards untouched. `lease` returns `"headers": {"X-Msb-Lease": "v1.…"}`.
+2. **Tokens must not be bound to `generation`.** Kandev caches a lease and
+   refreshes it only 30 s before `expires_at` (`connectionLeaseManager`,
+   around lines 138–200). A 401 does **not** make it re-resolve. After
+   `start`, Kandev keeps sending the token it already holds until that
+   refresh, so a generation-bound token makes every VM restart fail for up
+   to 10 minutes. **Required:** bind the HMAC to `name | guest port |
+   created_at | valid_until` (the sandbox incarnation). Report `expires_at` =
+   now + 10 min but accept until `valid_until` = now + 15 min. Keep
+   `lease.key.prev` accepted for 15 min after a key change. The accept
+   criteria are the ones in the earlier F18: a token minted before
+   `stop`/`start` still works; after `destroy` + re-`provision` it does not.
+
+The plugin will not hand Kandev a lease that sets a header Kandev refuses: it
+checks `headers` against that list and answers `unavailable`, logging the
+cause, rather than letting the launch fail later with a generic error.
+
 ## Milestones
 
 Each milestone is independently useful and unblocks a plugin phase.
@@ -744,7 +782,10 @@ What msbctl needs is below. The plugin owns the CA, key generation and
 renewal; msbctl stores the certificate and serves it.
 
 **Built** on msb-manager branch `kandev-tls`; the differences are in
-[Changes from request 2](#changes-from-request-2).
+[Changes from request 2](#changes-from-request-2). **Two of them must be
+reverted before this can work with Kandev**; see
+[Plugin review of request 2](#plugin-review-of-request-2-2026-10-19-two-blockers).
+F18 below is the shape as built, which Kandev refuses.
 
 ### F16: `serve = "proxy"`, the TLS proxy
 
