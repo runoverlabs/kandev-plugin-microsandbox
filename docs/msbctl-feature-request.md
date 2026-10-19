@@ -10,6 +10,7 @@ the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built on msb-manager branch `kandev-tls` (2026-10-19), not merged yet. It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
+**Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
 
 ## Summary

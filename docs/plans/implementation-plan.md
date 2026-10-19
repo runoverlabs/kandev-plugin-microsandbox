@@ -23,7 +23,7 @@ The first version planned `sandboxd`, a Go daemon on each host driving microsand
 - **No Go SDK.** msbctl drives the `msb` CLI. Only the plugin is Go, because kandev's plugin SDK is.
 - **Secrets are re-sent, never stored.** In the SDK path, `SecretEntry{Value}` makes msb persist the raw value in its own host-side sandbox config (upstream `docs/security/secrets.mdx`, "Where the values live"), so "used once, never stored" was not possible that way. The CLI form `--secret ENV@HOST` stores only a reference and reads the value from the environment of `msb` at every start. So the provision **and** every start/attach request carry the profile's extra secrets. msbctl puts them in `msb`'s environment and writes nothing.
 - **No proxy of our own in the default design.** kandev only ever leases two guest ports per VM, and both are published at create time. `tailscale serve` provides HTTPS with a publicly trusted tailnet certificate and maps a path prefix to each published loopback port. A small stdlib TLS splice in msbctl is the fallback if `tailscale serve` fails the spike (see Data path).
-- **Expiry and reconcile are one-shot timers, not loops in a daemon.** `msbctl kandev reap` runs from a systemd user timer. `--max-duration` only *stops* a sandbox, so deleting at expiry is the reaper's job.
+- **Expiry and reconcile are one-shot timers, not loops in a daemon.** `msbctl host kandev reap` runs from a systemd user timer. `--max-duration` only *stops* a sandbox, so deleting at expiry is the reaper's job.
 - **The inventory is msbctl's registry**: one entry per kandev environment, plus msb labels for reconcile. No SQLite.
 
 What already exists in msbctl, and what this plan adds, is marked throughout: **[exists]** or **[new]**.
@@ -252,15 +252,16 @@ Same file as the rest of msbctl. Same constraints too: Python 3.11+ stdlib and t
 | `kandev health` | – | versions (msbctl, msb), `/dev/kvm`, capacity used/free, `tailscale serve` status | n/a |
 | `kandev provision ENV` | header: spec + secrets | create the VM (see below), return the record | same `operation_id` + digest → existing record; different digest → `conflict` |
 | `kandev agentctl ENV` | header `{sha256, size, version, nonce, runtime_port}` + binary bytes | write `/opt/kandev/agentctl` in the guest, verify sha256, start it with the nonce, wait for 8765 to accept | same sha256 and running → no-op |
-| `kandev inspect ENV` | – | state, expiry, port map, agentctl running | n/a |
-| `kandev find --operation OP` | – | the record with that operation id, or `not_found` | n/a |
-| `kandev list` | – | every kandev entry (for reconcile and admin) | n/a |
+| `show NAME --json` | – | the record under `kandev`: state, expiry, port map, agentctl running (checked live) | n/a |
+| `ls --json` | – | every kandev entry, each record under `kandev` (for reconcile, admin, and finding an operation id) | n/a |
 | `kandev start ENV` | header: secrets | start a stopped VM with the re-sent secrets, restart agentctl | running → no-op |
-| `kandev stop ENV` | – | stop the VM, keep its disk | stopped → no-op |
+| `stop NAME --json` | – | stop the VM, keep its disk | stopped → no-op |
 | `kandev expiry ENV --at ISO` | – | set `expires_at`, never past `max_expires_at` | last write wins |
 | `kandev lease ENV PORT` | – | `{base_url, expires_at, generation}`; `not_found` for a port not in the map | new expiry each call |
-| `kandev destroy ENV` | – | remove the VM, its disk, its serve mappings and its entry; success when already absent | always safe |
-| `kandev reap` | – | the timer's job: expiry and reconcile (below) | always safe |
+| `purge NAME -y --json` | – | remove the VM, its disk, its serve mappings and its entry; exit 0 when already absent | always safe |
+| `host kandev reap` | – | the timer's job: expiry and reconcile (below); refused to the plugin's key | always safe |
+
+`show`, `stop` and `purge` are msbctl's generic verbs: under the plugin's key they see Kandev's sandboxes only, and take the sandbox `NAME` from the record (`k-…`), never one derived from the env id.
 
 ### Provision
 
@@ -282,9 +283,9 @@ Same file as the rest of msbctl. Same constraints too: Python 3.11+ stdlib and t
 - A host reboot leaves kandev VMs stopped (`autostart = false`), because their secrets exist nowhere on the host. The next `AttachExecutorEnvironment` re-sends them.
 - `kandev agentctl` and `kandev start` are the only callers that see the nonce. It is read from stdin and passed to the guest on the stdin of `msb exec` (`read -r n; AGENTCTL_BOOTSTRAP_NONCE=$n setsid … &`), so it is never in any argv or file. Whether a restarted agentctl needs a fresh nonce from kandev is an open question.
 
-### Inventory and reconcile (`kandev reap`)
+### Inventory and reconcile (`host kandev reap`)
 
-The registry entries are the inventory, and msb's labels are the cross-check. `msbctl host kandev install` **[new, modelled on `host autostart install`]** writes a systemd user service + timer that runs `msbctl kandev reap` every 60 s. It is not a daemon: each run does this and exits:
+The registry entries are the inventory, and msb's labels are the cross-check. `msbctl host kandev install` **[new, modelled on `host autostart install`]** writes a systemd user service + timer that runs `msbctl host kandev reap` every 60 s. It is not a daemon: each run does this and exits:
 
 - **Expiry**: destroy every entry past `expires_at`, including its serve mappings and disk.
 - **Reconcile**: an entry whose VM is gone → mark `absent`. An entry stuck in `creating` for longer than the provision deadline → destroy. A VM labelled `msbctl.owner=kandev` with no entry and older than 1 h → `msb rm -f`.
@@ -292,7 +293,7 @@ The registry entries are the inventory, and msb's labels are the cross-check. `m
 
 ### `host serve --kandev` [new mode of an existing verb]
 
-`host serve` already parses `SSH_ORIGINAL_COMMAND` with `shlex`, decides with `build_parser()` itself, refuses with one stderr line and exit 126, and sets `MSB_RESTRICTED=1` **[exists]**. The `--kandev` mode allows `msbctl kandev <verb>` and `msbctl --version` only, and every kandev verb refuses a name that is not a kandev entry. Add a test row per verb to `tests/test_host_serve.py`, and refused rows for the operator's verbs (`shell`, `secret`, `setup`, `allow`, …) under the kandev key.
+`host serve` already parses `SSH_ORIGINAL_COMMAND` with `shlex`, decides with `build_parser()` itself, refuses with one stderr line and exit 126, and sets `MSB_RESTRICTED=1` **[exists]**. The `--kandev` mode allows `msbctl kandev <verb>`, `ls --json`, `show NAME --json`, `stop NAME --json`, `purge NAME -y --json` and `msbctl --version` only, and every one of them refuses or hides a name that is not a kandev entry. Add a test row per verb to `tests/test_host_serve.py`, and refused rows for the operator's verbs (`shell`, `secret`, `setup`, `allow`, …) under the kandev key.
 
 This key **does** set egress and secret bindings, which the laptop's key may never do. That is deliberate: the kandev profile is the policy, and the kandev server is an operator-run component. What bounds it is `[kandev] allow_extra`, the reserved-name refusal, and the fact that kandev verbs only see kandev entries.
 
@@ -420,11 +421,11 @@ Check exact field names for `actions`, `capabilities.state` and `capabilities.se
 | --- | --- |
 | `ValidateExecutorProfile` | Validate fields (see Configuration model); resolve placement against the registry; return effective capabilities. No host calls that write. |
 | `ProvisionExecutorEnvironment` | Place → `kandev provision ENV` (spec + secrets on stdin) → `CheckpointExecutorResource` with `{host, sandbox_name}` immediately → stream agentctl with `ReadExecutorRuntimeArtifact`, verify SHA-256 → `kandev agentctl ENV` (header + binary on stdin) → return descriptor (handle `<host>/<env>`, platform `linux/<arch>`, retention `bounded`, `expires_at`). Report progress stages between steps. |
-| `RecoverExecutorOperation` | For each host (placement candidates first, then all): `kandev find --operation OP`. One match → `found` + descriptor. All hosts answered with no match → `absent`. Any host unreachable → `unknown`. |
-| `AttachExecutorEnvironment` | `kandev inspect` on the recorded host. Stopped → `kandev start` with the profile's secrets on stdin. Return the same descriptor; if the VM is gone return `not_found`, never re-provision. |
-| `InspectExecutorEnvironment` | `kandev inspect` on the recorded host; map `running`→`running`, `stopped`→`suspended`, `absent`→`absent`, past expiry →`terminated`; host unreachable →`unknown`. |
+| `RecoverExecutorOperation` | For each host (placement candidates first, then all): `ls --json`, filtered on `kandev.operation_id`. One match → `found` + descriptor. All hosts answered with no match → `absent`. Any host unreachable → `unknown`. |
+| `AttachExecutorEnvironment` | `show NAME --json` on the recorded host. Stopped → `kandev start` with the profile's secrets on stdin. Return the same descriptor; if the VM is gone return `not_found`, never re-provision. |
+| `InspectExecutorEnvironment` | `show NAME --json` on the recorded host; map `running`→`running`, `stopped`→`suspended`, `absent`→`absent`, past expiry →`terminated`; host unreachable →`unknown`. |
 | `ResolveExecutorConnection` | `kandev lease ENV PORT` on the recorded host; return `base_url`, `expires_at`, `generation`, and empty header maps (or `Authorization: Bearer <token>` in both with the fallback proxy). Must finish within 15 s. |
-| `DestroyExecutorEnvironment` | `kandev destroy ENV` on the recorded host (or `kandev find --operation` first when the handle is missing). Success → `confirmed_absent: true`; host unreachable → `unavailable` (retryable). |
+| `DestroyExecutorEnvironment` | `purge NAME -y --json` on the recorded host (or an operation-id search over `ls --json` first when the handle is missing). Success → `confirmed_absent: true`; host unreachable → `unavailable` (retryable). |
 
 ### Placement algorithm
 
@@ -529,7 +530,7 @@ Kandev recovers its inventory and calls `InspectExecutorEnvironment` and `Attach
 
 ### Destroy
 
-Triggered by task archive or delete, Reset Environment, retention expiry in kandev, or rollback. The plugin runs `kandev destroy` on the recorded host, and success or already-absent → `confirmed_absent`. If the host is unreachable it returns retryable `unavailable`, and kandev keeps the record in `cleanup_pending`.
+Triggered by task archive or delete, Reset Environment, retention expiry in kandev, or rollback. The plugin runs `purge NAME -y --json` on the recorded host, and success or already-absent → `confirmed_absent`. If the host is unreachable it returns retryable `unavailable`, and kandev keeps the record in `cleanup_pending`.
 
 ### Expiry on the host
 
@@ -546,10 +547,10 @@ Seven phases, each ending in a demonstrable check. Do not start a phase until th
    - a guest reaches a tailnet `api_url` through an egress rule, and a non-allowlisted host is refused;
    - cold and warm SSH + `msb` round-trip times against the 15 s and 30 s deadlines.
    - Accept: all PASS, timings recorded.
-2. **Phase 1 — msbctl kandev core.** `[kandev]` config, the `kandev` entry kind and template, `provision`, `inspect`, `find`, `list`, `start`, `stop`, `expiry`, `destroy`, `health`, the lock, labels, the `is_kandev` skips.
+2. **Phase 1 — msbctl kandev core.** `[kandev]` config, the `kandev` entry kind and template, `provision`, `start`, `expiry`, `health`, kandev records in `ls`, `show`, `stop` and `purge`, the lock, labels, the `is_kandev` skips.
    - Accept: create is idempotent by operation id; a mismatched digest returns `conflict`; delete of an absent VM succeeds; no secret value reaches argv, stdout or any file (`assert_not_in_argv` **[exists]**); capacity refusal returns `rate_limited`.
-3. **Phase 2 — agentctl, leases, data path, reaper.** `kandev agentctl`, `kandev lease`, the serve mappings, `kandev reap`, `host kandev install`, `host serve --kandev`, `host authorize --kandev`.
-   - Phase 2b (Oct 19 decision): `[kandev] serve = "proxy"`, `msbctl kandev proxy` (installed by `host kandev install`), `kandev tls install`, HMAC lease tokens, `health.tls`.
+3. **Phase 2 — agentctl, leases, data path, reaper.** `kandev agentctl`, `kandev lease`, the serve mappings, `host kandev reap`, `host kandev install`, `host serve --kandev`, `host authorize --kandev`.
+   - Phase 2b (Oct 19 decision): `[kandev] serve = "proxy"`, `msbctl host kandev proxy` (installed by `host kandev install`), `kandev tls install`, HMAC lease tokens, `health.tls`.
    - Accept: from the kandev server, a curl through a leased `base_url` with its bearer header reaches agentctl's control port, and without it is refused; a WebSocket echo through it works; a destroyed VM's port refuses connections; the kandev key is refused for every operator verb and the laptop key for every kandev verb.
 4. **Phase 3 — plugin skeleton and host registry.** Manifest, Sandbox Hosts page, actions, plugin state and secrets, key generation and host-key pinning, `ValidateExecutorProfile`, placement. Then the certificate authority: `ca.create`/`ca.get`, host certificate issuance and renewal through `kandev tls install`, and the trust check in `hosts.test`.
    - Accept: plugin installs on kandev 0.97+; hosts can be added, tested and drained; a profile saves only with valid placement and a digest-pinned image; with the root installed on the Kandev server, `hosts.test` reports the host's certificate as trusted, and without it reports that it is not.

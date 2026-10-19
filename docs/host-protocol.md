@@ -7,10 +7,7 @@ plugin implements it today; what msbctl needs to build is in the
 [msbctl feature request](msbctl-feature-request.md).
 
 **Protocol version: 1.** `health` reports it, and the plugin refuses a host
-reporting any other version rather than guessing. It also refuses a
-protocol-1 host whose `health` has no `tls` key: those predate msbctl
-folding `list`, `inspect`, `find`, `stop` and `destroy` into its generic
-verbs (`protocol` did not change), and get the `outdated` diagnosis. It never gates on
+reporting any other version rather than guessing. It never gates on
 `msbctl_version`: a checkout reports `0.3.0+<sha> (git checkout)`, and the
 first hosts with these verbs run msb-manager `main` ahead of a release.
 
@@ -26,9 +23,9 @@ in a release.
   --kandev`, which writes `restrict,command="<msbctl> host serve --kandev"`.
   No `pty`.
 - The plugin sends one command line, `shlex.join(argv)`, which `host serve`
-  splits again with `shlex.split` and checks with its parser. Only
-  `msbctl kandev <verb> …` and `msbctl --version` are allowed under
-  `--kandev`. A refusal is exit status **126**.
+  splits again with `shlex.split` and checks with its parser. Under
+  `--kandev` it allows `msbctl kandev <verb> …`, the four generic verbs
+  below in their exact shapes, and `msbctl --version`. A refusal is exit status **126**.
 - One SSH connection per host is reused, with one session per command.
 
 ## Output

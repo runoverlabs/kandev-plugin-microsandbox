@@ -40,12 +40,10 @@ First development snapshot: the provider skeleton and the host registry
     there is no resource state, and stays retryable while a host is down.
   - Placement heals a proxy host's certificate before counting it.
 - Resource state gains `env`, the Kandev environment id.
-- Follows msbctl folding five kandev verbs into its generic ones: inventory,
-  inspect, stop and removal use `ls`, `show`, `stop` and `purge … -y` with
-  `--json`, addressed by the sandbox name from the resource state, and
-  `find --operation` becomes a filter over `ls --json`. A host on protocol 1
-  whose health has no `tls` predates that change and is diagnosed
-  `outdated` (update msb-manager) rather than half-working.
+- Inventory, inspect, stop and removal use msbctl's generic verbs (`ls`,
+  `show`, `stop` and `purge … -y`, with `--json`), addressed by the sandbox
+  name from the resource state. A lost provision reply is found by
+  filtering `ls --json` on the operation id.
 - A root certificate for sandbox hosts: `ca.create` generates one,
   name-constrained to the hosts' domain, and `ca.get` shows it with install
   steps for the Kandev server. Host certificates are issued at `hosts.add`

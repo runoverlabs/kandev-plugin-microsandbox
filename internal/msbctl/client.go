@@ -67,11 +67,8 @@ type Error struct {
 	Reason string
 }
 
-// Reasons a host's health is unsupported.
-const (
-	ReasonProtocol = "protocol" // another protocol version
-	ReasonOutdated = "outdated" // protocol 1, but msbctl predates the generic verbs
-)
+// ReasonProtocol marks a host on another protocol version.
+const ReasonProtocol = "protocol"
 
 func (e *Error) Error() string { return "msbctl kandev: " + e.Code }
 
@@ -148,12 +145,6 @@ func (c *Client) Health(ctx context.Context, h hosts.Host) (Health, error) {
 	}
 	if out.Protocol != ProtocolVersion {
 		return out, &Error{Code: CodeUnsupported, Reason: ReasonProtocol}
-	}
-	// `protocol` did not change when msbctl folded list, inspect, find,
-	// stop and destroy into its generic verbs; `health.tls` shipped with
-	// that change, so its absence marks a host that still has the old verbs.
-	if out.TLS == nil {
-		return out, &Error{Code: CodeUnsupported, Reason: ReasonOutdated}
 	}
 	return out, nil
 }

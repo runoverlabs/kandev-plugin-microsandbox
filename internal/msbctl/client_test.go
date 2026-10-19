@@ -62,17 +62,6 @@ func TestHealthRefusesOtherProtocolVersions(t *testing.T) {
 	assert.Equal(t, ReasonProtocol, e.Reason)
 }
 
-// protocol stayed 1 when msbctl folded five kandev verbs into its generic
-// ones; health.tls arrived with that change and marks a current host.
-func TestHealthRefusesAHostThatPredatesTheGenericVerbs(t *testing.T) {
-	runner := &fakeRunner{reply: reply{stdout: `{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":true}}`}}
-	_, err := New(runner).Health(context.Background(), hosts.Host{})
-	var e *Error
-	require.True(t, errors.As(err, &e))
-	assert.Equal(t, CodeUnsupported, e.Code)
-	assert.Equal(t, ReasonOutdated, e.Reason)
-}
-
 func TestCapacityRequiresAUsableHost(t *testing.T) {
 	for _, body := range []string{
 		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true},"tls":{"installed":false}}`,

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -228,23 +227,4 @@ func closedAddress(t *testing.T) string {
 	address := listener.Addr().String()
 	require.NoError(t, listener.Close())
 	return address
-}
-
-// A host on protocol 1 without health.tls still has the old kandev verbs:
-// Test names the fix, and placement never picks it.
-func TestOutdatedHostIsDiagnosedAndNeverPlaced(t *testing.T) {
-	r := newRuntime(t, newFakeHost())
-	old := strings.Replace(healthyJSON, `,"tls":{"installed":false}`, ``, 1)
-	server := sshtest.Start(t, pluginKey(t, r), msbctlHost(map[string]sshtest.Reply{"health": {Stdout: old}}))
-	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey, "default"))))
-	_, body := call(t, r, ActionHostsTest, map[string]any{"name": "sbx-01"})
-	assert.Equal(t, false, body["ok"])
-	assert.Equal(t, "outdated", body["problem"])
-
-	client, err := r.client(t.Context())
-	require.NoError(t, err)
-	registry, err := r.loadRegistry(t.Context())
-	require.NoError(t, err)
-	_, err = hosts.Place(t.Context(), registry.Hosts, placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
-	assert.ErrorIs(t, err, hosts.ErrUnreachable, "an outdated host is not a candidate")
 }
