@@ -186,6 +186,6 @@ The plugin has only actions so far. Build:
   `config.toml.bak-*`, `authorized_keys.bak-kandev-*`.
 - Verified for real so far: provision with workspace disk, opencode config
   bundle copied, agentctl handshake through the proxy, an opencode agent turn
-  (refused only at the model, by egress), inspect, reaper expiry, purge.
+  answered through the LAN model (PONG), inspect, reaper expiry, purge.
 - The Cursed test tasks are deleted; their sandboxes expire on their own
   (task delete leaks, see 7).
