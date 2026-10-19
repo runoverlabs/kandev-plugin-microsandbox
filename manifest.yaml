@@ -4,7 +4,7 @@
 # with the pinned Kandev's own validator.
 id: "kandev-plugin-microsandbox"
 api_version: 2
-version: "0.1.0-dev.3"
+version: "0.1.0-dev.4"
 display_name: "microsandbox"
 description: "Run each Kandev session in its own microsandbox microVM on registered sandbox hosts."
 author: "naerymdan"
