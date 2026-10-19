@@ -122,6 +122,15 @@ type Health struct {
 	TLS *TLSStatus `json:"tls,omitempty"`
 	// Features are additions within protocol 1, by name.
 	Features []string `json:"features,omitempty"`
+	// Egress is the host's bound on what a provision may add (feature
+	// request F21); absent on hosts that do not report it.
+	Egress *EgressPolicy `json:"egress,omitempty"`
+}
+
+// EgressPolicy is the host's `[kandev] allow_extra`: "*", hostname patterns
+// and, with F21, addresses, address:port entries and CIDRs.
+type EgressPolicy struct {
+	AllowExtra []string `json:"allow_extra"`
 }
 
 // Missing returns the required features the host does not list.

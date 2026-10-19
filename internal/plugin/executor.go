@@ -2,10 +2,12 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 
+	"kandev-plugin-microsandbox/internal/egress"
 	"kandev-plugin-microsandbox/internal/msbctl"
 	"kandev-plugin-microsandbox/internal/profile"
 )
@@ -59,6 +61,19 @@ func (r *Runtime) ValidateExecutorProfile(ctx context.Context, req *pluginsdk.Va
 	}
 	if len(registry.Candidates(spec.Placement)) == 0 {
 		response.FieldErrors = append(response.FieldErrors, fieldError(profile.FieldError{Field: profile.FieldPlacement, Code: CodeUnresolved}))
+	}
+	policy, err := r.loadEgress(ctx)
+	if err != nil {
+		log.Printf("validate executor profile: %v", err)
+		response.Error = providerError(msbctl.CodeUnavailable, "egressUnavailable")
+		return response, nil
+	}
+	if _, err := policy.Expand(spec.EgressGroups, spec.EgressAllow); err != nil {
+		code := CodeUnresolved
+		if !errors.Is(err, egress.ErrUnknown) {
+			code = profile.CodeInvalid
+		}
+		response.FieldErrors = append(response.FieldErrors, fieldError(profile.FieldError{Field: profile.FieldEgressGroups, Code: code}))
 	}
 	return response, nil
 }

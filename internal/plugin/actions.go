@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 
+	"kandev-plugin-microsandbox/internal/egress"
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
 	"kandev-plugin-microsandbox/internal/sshx"
@@ -58,6 +59,14 @@ func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionR
 		handler = r.actionCAGet
 	case ActionCACreate:
 		handler = r.actionCACreate
+	case ActionEgressList:
+		handler = r.actionEgressList
+	case ActionEgressPut:
+		handler = r.actionEgressPut
+	case ActionEgressRemove:
+		handler = r.actionEgressRemove
+	case ActionEgressDefaults:
+		handler = r.actionEgressDefaults
 	default:
 		return respond(fail(http.StatusNotFound, "unknown action")), nil
 	}
@@ -347,6 +356,9 @@ type testResult struct {
 	Warning string         `json:"warning,omitempty"`
 	Health  *msbctl.Health `json:"health,omitempty"`
 	TLS     *tlsOutcome    `json:"tls,omitempty"`
+	// EgressRefused are default-group entries the host's allow_extra would
+	// refuse, which fails every provision there.
+	EgressRefused []string `json:"egress_refused,omitempty"`
 }
 
 func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
@@ -390,7 +402,34 @@ func (r *Runtime) actionTest(ctx context.Context, body []byte) response {
 	if err == nil && health.BaseURL != "" && strings.TrimRight(health.BaseURL, "/") != h.BaseURL {
 		result.Warning = "The host reports base_url " + health.BaseURL + ", not the registered " + h.BaseURL + "."
 	}
+	if err == nil && health.Egress != nil {
+		r.diagnoseEgress(ctx, &result, health.Egress.AllowExtra)
+	}
 	return ok(result)
+}
+
+// diagnoseEgress checks the policy's default groups against the host's
+// allow_extra. msbctl refuses a whole provision over one entry, so a refused
+// default makes the host unusable for every profile.
+func (r *Runtime) diagnoseEgress(ctx context.Context, result *testResult, allowExtra []string) {
+	policy, err := r.loadEgress(ctx)
+	if err != nil {
+		return
+	}
+	entries, err := policy.Expand(nil, nil)
+	if err != nil {
+		return
+	}
+	refused := egress.Refused(entries, allowExtra)
+	if len(refused) == 0 {
+		return
+	}
+	result.EgressRefused = refused
+	result.OK = false
+	if result.Problem == "" {
+		result.Problem = "egress_refused"
+		result.Hint = "The host's [kandev] allow_extra does not admit every default egress entry, so it refuses every provision. Add them there, or set allow_extra = [\"*\"] to let this Kandev server decide."
+	}
 }
 
 func diagnose(health msbctl.Health, err error, publicKey string) testResult {

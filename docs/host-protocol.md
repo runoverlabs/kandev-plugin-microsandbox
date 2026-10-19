@@ -89,6 +89,9 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
   `workspace_disk` (feature request F20) and reports a host without it as
   `outdated`: msb-manager 0.4.0 ignores `workspace_gib` and would provision
   sandboxes with no `/workspace`.
+- `egress` (optional, feature request F21) is `{"allow_extra": [...]}`, the
+  host's bound on provision's `egress_allow`. When present, Test checks the
+  plugin's default egress groups against it.
 - `enabled` is `[kandev] enabled` from the host's msbctl config.
 - `capacity` counts **kandev sandboxes only**, against the `[kandev]`
   limits. `max_memory` is reported in MiB.
@@ -140,6 +143,11 @@ unknown while any host did not.
 | inspect | `msbctl show NAME --json` → its `kandev` record | name |
 | stop | `msbctl stop NAME --json` → `sandboxes[0].kandev` | name |
 | remove | `msbctl purge NAME -y --json`; exit 0 = gone, whether or not it existed | name |
+
+`provision`'s `egress_allow` carries the expanded egress policy (default
+groups, the profile's groups, its own entries): `host`, `*.suffix`,
+`host:port`, `address`, `address:port` or `[v6]:port`, each one msbctl's
+`parse_allow_target` accepts.
 
 `NAME` is always the record's `name`, stored in the resource state, never
 derived from the env id. The argv shapes are exact: `host serve --kandev`

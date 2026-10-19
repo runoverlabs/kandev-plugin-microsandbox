@@ -70,9 +70,11 @@ func TestManifestActionsAreTheHandledOnesAndAdminOnly(t *testing.T) {
 		assert.Equal(t, "workspace", a.Scope, a.Key)
 	}
 	sort.Strings(keys)
-	// ca.create and ca.get manage the root certificate (host-side TLS).
+	// ca.create and ca.get manage the root certificate (host-side TLS);
+	// egress.* the plugin-wide egress policy.
 	assert.Equal(t, []string{
 		ActionCACreate, ActionCAGet,
+		ActionEgressDefaults, ActionEgressList, ActionEgressPut, ActionEgressRemove,
 		ActionHostsAdd, ActionHostsDrain, ActionHostsList, ActionHostsRemove,
 		ActionHostsScan, ActionHostsTest, ActionHostsUpdate,
 	}, keys)
@@ -89,7 +91,7 @@ func TestManifestProviderMatchesTheCode(t *testing.T) {
 	want := []string{
 		profile.FieldPlacement, profile.FieldImage, profile.FieldCPUs, profile.FieldMemoryMiB,
 		profile.FieldDiskGiB, profile.FieldWorkspaceGiB, profile.FieldMaxLifetimeHours, profile.FieldRetainHours,
-		profile.FieldEgressAllow, profile.FieldEnv, profile.FieldRegistryUsername, profile.FieldRegistryPassword,
+		profile.FieldEgressAllow, profile.FieldEgressGroups, profile.FieldEnv, profile.FieldRegistryUsername, profile.FieldRegistryPassword,
 	}
 	secret := map[string]bool{profile.FieldRegistryPassword: true}
 	for slot := 1; slot <= profile.ExtraSecretSlots; slot++ {

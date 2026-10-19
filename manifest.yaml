@@ -4,7 +4,7 @@
 # with the pinned Kandev's own validator.
 id: "kandev-plugin-microsandbox"
 api_version: 2
-version: "0.1.0-dev.2"
+version: "0.1.0-dev.3"
 display_name: "microsandbox"
 description: "Run each Kandev session in its own microsandbox microVM on registered sandbox hosts."
 author: "naerymdan"
@@ -75,6 +75,22 @@ actions:
     scope: "workspace"
     access: "admin"
     max_body_bytes: 4096
+  - key: "egress.list"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "egress.put"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 16384
+  - key: "egress.remove"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 1024
+  - key: "egress.defaults"
+    scope: "workspace"
+    access: "admin"
+    max_body_bytes: 4096
 
 executor_providers:
   - key: "microsandbox"
@@ -134,7 +150,11 @@ executor_providers:
         egress_allow:
           type: string
           title: "Extra egress"
-          description: "Comma-separated host or host:port entries added to the host's base rules. Rules are hostname-based and inspected on :443; on other ports a hostname degrades to its resolved IPs, and plain HTTP (:80) is always denied."
+          description: "Comma-separated entries this profile adds: host (HTTPS), *.suffix (HTTPS), host:port, address or address:port, such as 192.168.2.6:8788. On ports other than 443 a hostname is enforced as its resolved addresses; plain HTTP on :80 is always denied."
+        egress_groups:
+          type: string
+          title: "Egress groups"
+          description: "Comma-separated egress groups this profile adds to the plugin's default groups, such as openrouter or a group of your own. Managed with the egress actions."
         env:
           type: string
           title: "Environment"

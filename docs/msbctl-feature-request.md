@@ -9,6 +9,7 @@
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
+**Fourth request, 2026-10-19:** [F21](#f21-allow_extra-admits-addresses-and-health-reports-it), central egress from the plugin.
 **Third request, 2026-10-19:** [F20](#f20-a-workspace-disk-at-workspace), from the first real run. Released in 0.5.0.
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
@@ -976,6 +977,40 @@ expiry. The optional `max_disk` limit and capacity fields were not built.
 requested size; it survives `stop`/`start`; `purge`, expiry and reconcile
 leave no volume behind; a header without `workspace_gib` is
 `invalid_config`; `health.features` contains `"workspace_disk"`.
+
+## Request 4: central egress from the plugin (2026-10-19)
+
+Sandboxes run arbitrary agent harnesses (opencode, pi, hermes, …) against
+models that live anywhere: a LAN server, OpenRouter, a vendor API. So the
+plugin now keeps a central egress policy (named groups, default groups for
+every sandbox) and sends the expanded list as provision's `egress_allow`,
+which msbctl already accepts, including address targets such as
+`192.168.2.6:8788`. Two gaps remain on the host side.
+
+### F21: `allow_extra` admits addresses, and `health` reports it
+
+- **`[kandev] allow_extra` accepts address entries**, alongside `"*"` and
+  hostname patterns: an address (`192.168.2.6`, any port), an
+  `address:port` (`192.168.2.6:8788`), and a CIDR (`192.168.2.0/24`, any
+  port). Today an address target passes only with `"*"`, because
+  `kandev_egress` compares the target's host part against hostname patterns,
+  so an operator who wants a bound cannot admit one LAN model server without
+  admitting everything. A hostname pattern keeps matching the host part on
+  any port, as now. Refuse a CIDR wider than /8 (IPv4) or /32 (IPv6) at
+  config load, like the plugin's own range limits.
+- **`health.egress = {"allow_extra": [...]}`**, the effective list. The
+  plugin's Test then checks its default groups against it before any launch:
+  msbctl refuses a whole provision over one entry, so a host that would refuse
+  a default is unusable for every profile, and the operator should hear that
+  from Test rather than from a failed task. Not secret: it is the operator's
+  own policy.
+- No change to provision itself: `egress_allow` keeps its shape and its
+  checks.
+
+**Accept:** `allow_extra = ["192.168.2.6:8788"]` admits `192.168.2.6:8788`
+and refuses `192.168.2.6:8789`; `["192.168.2.0/24"]` admits any port on
+`192.168.2.6`; `["pypi.org"]` still refuses `192.168.2.6:8788`; a /4 is a
+config error; `health.egress.allow_extra` equals the loaded list.
 
 ## Open questions
 

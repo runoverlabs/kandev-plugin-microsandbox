@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 
+	"kandev-plugin-microsandbox/internal/egress"
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
 	"kandev-plugin-microsandbox/internal/profile"
@@ -186,6 +187,13 @@ func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *plugins
 	registry, err := r.loadRegistry(ctx)
 	if err != nil {
 		return fail(providerError(msbctl.CodeUnavailable, "registryUnavailable"))
+	}
+	if spec.EgressAllow, err = r.sandboxEgress(ctx, spec); err != nil {
+		log.Printf("provision %s: %v", rc.GetEnvironmentId(), err)
+		if errors.Is(err, egress.ErrUnknown) || errors.Is(err, egress.ErrPolicy) {
+			return fail(providerError(msbctl.CodeInvalidConfig, "egressInvalid"))
+		}
+		return fail(providerError(msbctl.CodeUnavailable, "egressUnavailable"))
 	}
 
 	progress(ctx, callbacks, rc, "provision", 0)
@@ -389,4 +397,15 @@ func (r *Runtime) hostFor(ctx context.Context, s resourceState) (hosts.Host, err
 		return hosts.Host{}, fmt.Errorf("host %q is no longer registered", s.Host)
 	}
 	return h, nil
+}
+
+// sandboxEgress is what a new sandbox may reach beyond the host's own rule
+// groups: the policy's default groups, the profile's groups, then the
+// profile's own entries.
+func (r *Runtime) sandboxEgress(ctx context.Context, spec profile.Spec) ([]string, error) {
+	policy, err := r.loadEgress(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return policy.Expand(spec.EgressGroups, spec.EgressAllow)
 }

@@ -11,9 +11,12 @@ package profile
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"kandev-plugin-microsandbox/internal/egress"
 )
 
 // Field names, matching manifest.yaml's profile_schema.
@@ -27,6 +30,7 @@ const (
 	FieldMaxLifetimeHours = "max_lifetime_hours"
 	FieldRetainHours      = "retain_hours"
 	FieldEgressAllow      = "egress_allow"
+	FieldEgressGroups     = "egress_groups"
 	FieldEnv              = "env"
 	FieldRegistryUsername = "registry_username"
 	FieldRegistryPassword = "registry_password"
@@ -115,6 +119,9 @@ type Spec struct {
 	MaxLifetimeHours int
 	RetainHours      int
 	EgressAllow      []string
+	// EgressGroups are names in the plugin's egress policy; whether they
+	// exist is checked against that policy, not here.
+	EgressGroups     []string
 	Env              []EnvVar
 	RegistryUsername string
 	RegistryPassword string
@@ -218,10 +225,15 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 		}
 	}
 
-	if hosts, ok := parseHostList(value(config, FieldEgressAllow), true); ok {
-		spec.EgressAllow = hosts
+	if entries, err := egress.ParseList(value(config, FieldEgressAllow)); err == nil && len(entries) <= egress.MaxGroupEntries {
+		spec.EgressAllow = entries
 	} else {
 		add(FieldEgressAllow, CodeInvalid)
+	}
+	if groups, ok := parseNames(value(config, FieldEgressGroups)); ok {
+		spec.EgressGroups = groups
+	} else {
+		add(FieldEgressGroups, CodeInvalid)
 	}
 
 	env, envErrs := parseEnv(value(config, FieldEnv))
@@ -439,4 +451,22 @@ func dedupe(errs []FieldError) []FieldError {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Code < out[j].Code })
 	return out
+}
+
+// parseNames splits a comma-separated list of egress group names.
+func parseNames(raw string) ([]string, bool) {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(item))
+		if name == "" {
+			continue
+		}
+		if !egress.ValidName(name) {
+			return nil, false
+		}
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out, len(out) <= egress.MaxGroups
 }

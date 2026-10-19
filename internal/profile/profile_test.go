@@ -127,13 +127,14 @@ func TestParseNumericBounds(t *testing.T) {
 }
 
 func TestParseEgressAllow(t *testing.T) {
-	spec, errs := Parse(with(validConfig(), FieldEgressAllow, " pypi.org, files.pythonhosted.org:443,*.example.com,PyPI.org "), nil)
+	spec, errs := Parse(with(validConfig(), FieldEgressAllow, " pypi.org, files.pythonhosted.org:443,*.example.com,PyPI.org ,192.168.2.6:8788"), nil)
 	require.Empty(t, errs)
-	assert.Equal(t, []string{"pypi.org", "files.pythonhosted.org:443", "*.example.com"}, spec.EgressAllow)
+	assert.Equal(t, []string{"pypi.org", "files.pythonhosted.org", "*.example.com", "192.168.2.6:8788"}, spec.EgressAllow)
 
 	for _, bad := range []string{
 		"https://pypi.org",
-		"10.0.0.1",
+		"127.0.0.1:8080",
+		"169.254.169.254",
 		"pypi.org:0",
 		"pypi.org:080",
 		"localhost",
@@ -143,6 +144,16 @@ func TestParseEgressAllow(t *testing.T) {
 	} {
 		_, errs := Parse(with(validConfig(), FieldEgressAllow, bad), nil)
 		assert.Equal(t, []FieldError{{FieldEgressAllow, CodeInvalid}}, errs, bad)
+	}
+}
+
+func TestParseEgressGroups(t *testing.T) {
+	spec, errs := Parse(with(validConfig(), FieldEgressGroups, " lan-llm, OpenRouter,lan-llm,, "), nil)
+	require.Empty(t, errs)
+	assert.Equal(t, []string{"lan-llm", "openrouter"}, spec.EgressGroups)
+	for _, bad := range []string{"lan_llm", "a b", "x,-y"} {
+		_, errs := Parse(with(validConfig(), FieldEgressGroups, bad), nil)
+		assert.Equal(t, []FieldError{{FieldEgressGroups, CodeInvalid}}, errs, bad)
 	}
 }
 

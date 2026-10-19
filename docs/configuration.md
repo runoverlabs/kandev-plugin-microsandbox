@@ -95,6 +95,7 @@ background pass every 6 hours and on every **Test**. A host whose
 | `no_root` | The host runs the TLS proxy, but the plugin has no root yet. Run `ca.create`. |
 | `not_permitted` | The host's `base_url` is outside the root's constraints. |
 | `tls_install_failed` | The host did not accept a new certificate. It is retried automatically. |
+| `egress_refused` | The host's `allow_extra` would refuse a default egress entry (listed in `egress_refused`), so every provision there fails. See [Egress](#egress). |
 | `root_not_trusted` | The Kandev server does not trust the plugin's root yet. Install it (`ca.get`) and restart Kandev. |
 
 ### What Kandev and the network need
@@ -129,6 +130,60 @@ Found on the first real run (Kandev 0.97.0, msb-manager 0.4.0):
 The plugin has **one SSH key** for every host. It is generated on first use,
 kept in the plugin's secret store, and only its public half is ever shown.
 
+## Egress
+
+Sandboxes are deny-by-default. Beyond the host's own base rules
+(`[kandev] rule_groups`, which nothing here can remove), a sandbox may reach:
+
+1. the **default groups** of the plugin's egress policy, for every sandbox;
+2. the groups its profile names in `egress_groups`;
+3. the entries in its profile's `egress_allow`.
+
+The policy is the plugin's, kept centrally, so the agent harness and model
+endpoints (a local LLM, OpenRouter, a vendor API) are configured once for
+every host and profile. Changes apply to sandboxes provisioned afterwards.
+
+**Entries**, in groups and in `egress_allow`:
+
+| Entry | Means |
+| --- | --- |
+| `api.openai.com` | that name, HTTPS on 443 |
+| `*.example.com` | every name below `example.com`, HTTPS on 443 only |
+| `llm.lan:8080` | that name, TCP port 8080 (enforced as the addresses it resolves to on the host) |
+| `192.168.2.6:8788` | that address, TCP port 8788 |
+| `192.168.2.6` | that address, 443 |
+| `[fd00::5]:8080` | an IPv6 address and port |
+
+No ranges, CIDRs, protocols or full msb rules: per-port precision is the
+point. Loopback, unspecified, link-local (which includes cloud metadata at
+169.254.169.254) and multicast addresses are refused. Plain HTTP on :80 is
+always denied by the host, but a LAN service on another port works by address.
+
+**Built-in groups**, read-only: `anthropic`, `deepseek`, `google-ai`, `groq`,
+`mistral`, `openai`, `opencode` (`opencode.ai` and the `models.dev` catalog),
+`openrouter`, `xai`. Each holds only its provider's API host.
+
+**Actions** (admin):
+
+| Action | Body | Does |
+| --- | --- | --- |
+| `egress.list` | `{}` | Every group, built-in and custom, each marked `default` when it is, and the `defaults` list. |
+| `egress.put` | `{"name": "lan-llm", "description": "...", "entries": ["192.168.2.6:8788"]}` | Creates (201) or replaces (200) a custom group. Names are lowercase letters, digits and dashes; built-in names are taken. |
+| `egress.remove` | `{"name": "lan-llm"}` | Deletes a custom group and drops it from the defaults. A profile still naming it fails validation, and a launch from it fails with `invalid_config`. |
+| `egress.defaults` | `{"groups": ["lan-llm", "opencode"]}` | Sets the groups every sandbox gets. |
+
+At most 32 custom groups of 32 entries each, and 64 entries per sandbox after
+expansion.
+
+**The host keeps the last word.** msbctl checks every entry against the
+host's `[kandev] allow_extra` and refuses the whole provision over one it does
+not admit. Its default, `[]`, admits nothing extra; for central control from
+this plugin, set `allow_extra = ["*"]` on hosts that trust this Kandev server.
+Today `allow_extra` matches hostnames only, so an address entry needs `"*"`
+(msbctl feature request F21 adds addresses). Once a host reports its
+`allow_extra`, Test checks the default groups against it and reports
+`egress_refused` with the entries it would refuse.
+
 ## Executor profile
 
 One profile per project, using the **microsandbox microVM** provider. Kandev
@@ -145,7 +200,8 @@ saved.
 | `workspace_gib` | no | 1–500, default 20. A disk of its own at `/workspace`, where Kandev starts the agent; removed with the sandbox |
 | `max_lifetime_hours` | yes | 1–168. The sandbox is destroyed at this age |
 | `retain_hours` | no | 0–168, default 24 |
-| `egress_allow` | no | Comma-separated `host` or `host:port`; `*.` wildcards allowed. No IPs, URLs or single-label names, and the last label is at least two characters. The host must also permit each entry in `[kandev] allow_extra` (below) |
+| `egress_allow` | no | Comma-separated egress entries this profile adds (grammar under [Egress](#egress)), at most 32 |
+| `egress_groups` | no | Comma-separated egress group names this profile adds to the defaults, such as `openrouter` or one of your own. Each must exist in the plugin's egress policy |
 | `env` | no | `KEY=VALUE;KEY2=VALUE2`, non-secret values only. Names are uppercase `A-Z`, `0-9`, `_`, at most 64 characters |
 | `registry_username` / `registry_password` | no | Both or neither. A private image must name its registry host (`ghcr.io/…`, `registry.example.com:5000/…`) |
 | `extra_secret_N_name` / `_value` / `_hosts` | no | N = 1–3. A name, a value and at least one host, all together |
@@ -159,21 +215,10 @@ credentials itself, the plugin configures agentctl, and secret values pass
 through the environment of the host's `msb` process. A name also cannot
 appear twice across `env` and the secrets.
 
-**Extra egress is the host's call too.** `[kandev] allow_extra` on each host
-lists the hostname patterns a profile may add; its default, `[]`, allows
-nothing extra, and `["*"]` trusts every profile. The plugin cannot see that
-setting when the profile is saved, so an entry the host does not allow fails
-at launch with `invalid_config`.
-
 **The image** must be complete: no bootstrap runs in a Kandev sandbox. It
 needs git, the agent CLIs the project uses, its toolchains, and a writable
 **`/workspace`**, where Kandev puts the session's checkout. Kandev installs
 agentctl itself at launch.
-
-Egress is hostname-based and inspected on :443. On any other port a hostname
-rule degrades to the IPs it resolves to, and plain HTTP (:80) is always
-denied. Profile entries are added to the host's own base rules
-(`[kandev] rule_groups`), which a profile cannot remove.
 
 An extra secret is a host-bound msb secret: the guest only ever sees a
 placeholder, and the sandbox host substitutes the real value into request

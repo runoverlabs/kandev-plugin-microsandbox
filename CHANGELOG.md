@@ -41,6 +41,12 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
     there is no resource state, and stays retryable while a host is down.
   - Placement heals a proxy host's certificate before counting it.
 - Resource state gains `env`, the Kandev environment id.
+- A central egress policy: named egress groups (built-in presets for common
+  model APIs, plus your own), default groups applied to every sandbox, and
+  the actions `egress.list`, `egress.put`, `egress.remove` and
+  `egress.defaults`. Profiles gain `egress_groups`; `egress_allow` now also
+  takes addresses (`192.168.2.6:8788`). Test reports `egress_refused` when a
+  host reports an `allow_extra` that would refuse a default.
 - Profile field `workspace_gib` (default 20): each sandbox gets a disk of its
   own at `/workspace`, where Kandev starts the agent. Hosts must list
   `workspace_disk` in `health.features` (msbctl feature request F20); Test
