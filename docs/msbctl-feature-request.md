@@ -9,7 +9,7 @@ v0.3.0, which has none of this. This document now describes what was built;
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Requested, not built. It changes F1, F4, F10 and F14 as marked there.
+**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built on msb-manager branch `kandev-tls` (2026-10-19), not merged yet. It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
 
 ## Summary
@@ -43,6 +43,7 @@ As of 2026-10-17:
 | Live run | The whole lifecycle against real msb 0.7.7, nested in an msb sandbox: provision, agentctl, inspect, lease, stop/start with re-sent secrets, expiry, reap, destroy. No secret, password or nonce reached argv or disk. |
 | Spikes | `spikes/16-kandev-host.sh`: S1, S3, S4 (pinned address) and the registry check PASS nested. **S2 (`tailscale serve`) and S5 (round trips) not run yet**: they need a tailnet node and a remote (`SPIKE_TS=1`, `SPIKE_SSH_DEST`). S4 should be re-run on a real host. |
 | Docs | "Kandev hosts" page and a `msbctl kandev` section on the Commands page. |
+| F16–F19 | Built on branch `kandev-tls`. `tests/test_kandev_tls.py` runs real TLS on loopback against certificates `openssl` makes at test time (a name-constrained root and its leaves). An end-to-end run of the CLI, with `curl` as the client, gave 200 with a lease, 401 without one, and connection refused after `destroy`. Not yet run against real msb or from another machine; the 10-minute WebSocket idle check hasn't been run either. |
 
 For the plugin:
 
@@ -96,6 +97,47 @@ What the plugin has to adopt. Each one is also in place below.
    also reports `errors` (F14).
 10. **Open questions 1, 2 and 4 are answered** (see Open questions).
 
+### Changes from request 2
+
+1. **`issuer_sha256` is the SHA-256 of the issuing certificate's DER**, the
+   usual fingerprint of your root. So `cert_pem` **must** hold the leaf and
+   then the certificate that issued it (the root, for a root that signs leaves
+   directly). `tls install` refuses a lone leaf, or a second certificate whose
+   subject is not the leaf's issuer (F17, F19).
+2. **The leaf must name the host in a subjectAltName** (DNS, or IP for an IP
+   `base_url`), as Go's verifier requires; the CN is not consulted. A
+   single-label wildcard (`*.domain`) matches. `tls install` needs
+   `[kandev] base_url` set, and refuses an encrypted `key_pem` (F17).
+3. **`proxy_listen` is an IP address, not a name.** `proxy_port_pool` may not
+   overlap `port_pool` (F16).
+4. **The serve mode is recorded per entry** (`serve`). Changing
+   `[kandev] serve` applies to new sandboxes. `lease`, `destroy` and `reap`
+   follow the mode the entry was made with, so a host switched to `"proxy"`
+   still removes its old `tailscale serve` paths (F16).
+5. **`lease` in proxy mode answers `unavailable`** while `proxy_listen` is
+   unset or no certificate is installed, as well as when the VM isn't running
+   (F18).
+6. **Exactly one `Authorization` header.** Two, even if one is valid, get the
+   401. The header is forwarded to the guest unchanged with the rest of the
+   request: the proxy does not rewrite heads (F16).
+7. **The proxy offers ALPN `http/1.1` only**, so Kandev's Go client never
+   negotiates HTTP/2, which would carry many requests on one connection past
+   the head check (F16).
+8. **Listeners exist for every proxied entry, whatever its state.** A valid
+   token for a stopped VM gets a fixed `502` (F16).
+9. **Rescans every 2 s**, and the proxy also re-reads the entry on each
+   connection. A destroyed sandbox therefore refuses new connections at once,
+   its ports close within 2 s, and its open connections are cut. A new
+   generation's token works the moment `start` returns (F16).
+10. **`health.serve` in proxy mode** also says not ok when `base_url` is
+    unset, and `reason` names the first problem found. `health.tls` is just
+    `{"installed": false}` until a certificate exists (F19).
+11. **`msbctl kandev proxy` is refused under `host serve --kandev`**: it is
+    the host's own service, not a verb for the plugin. `tls install` is
+    allowed. `host kandev install` writes `msb-kandev-proxy.service` and
+    restarts it, so re-running it after an upgrade picks up new code (F14,
+    F16).
+
 ## Milestones
 
 Each milestone is independently useful and unblocks a plugin phase.
@@ -107,7 +149,7 @@ Each milestone is independently useful and unblocks a plugin phase.
 | **M2: one session runs** | [F6](#f6-the-kandev-entry-kind) entry kind · [F7](#f7-kandev-provision) `provision` · [F8](#f8-kandev-agentctl) `agentctl` · [F9](#f9-kandev-inspect-and-kandev-find) `inspect` · [F10](#f10-kandev-lease-and-the-data-path) `lease` + serve mappings · [F11](#f11-kandev-destroy) `destroy` | A Kandev task launches, shows terminal, files, git and editor, and is cleaned up on archive |
 | **M3: it survives failure** | [F9](#f9-kandev-inspect-and-kandev-find) `find` · [F12](#f12-kandev-start-and-kandev-stop) `start`/`stop` · [F13](#f13-kandev-expiry) `expiry` · [F14](#f14-kandev-reap-and-host-kandev-install) `reap` + timer | Lost replies, Kandev restarts, host reboots, expiry |
 | **M4: docs** | [F15](#f15-documentation) "Kandev hosts" page | A new host in under 30 minutes from the docs |
-| **M5: host-side TLS** (request 2) | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
+| **M5: host-side TLS** (request 2), built on branch `kandev-tls` | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
 
 ## Constraints this must respect
 
@@ -701,6 +743,9 @@ terminates **on the sandbox host**, so traffic goes Kandev → host directly.
 What msbctl needs is below. The plugin owns the CA, key generation and
 renewal; msbctl stores the certificate and serves it.
 
+**Built** on msb-manager branch `kandev-tls`; the differences are in
+[Changes from request 2](#changes-from-request-2).
+
 ### F16: `serve = "proxy"`, the TLS proxy
 
 **Changes F1 and F14.** New `[kandev]` keys:
@@ -722,8 +767,8 @@ proxy_port_pool  = "30000-39999"    # public TLS ports, one per published guest 
   lease means a pooled connection can only ever reach one VM port, so there
   is **no HTTP parsing and no path routing**.
 - **Per connection:** complete the TLS handshake, then read the first
-  request head (cap 16 KiB, 10 s). Check its `X-Msb-Lease` token
-  ([F18](#f18-lease-tokens)) for *this* sandbox and guest port.
+  request head (cap 16 KiB, 10 s). Check its `Authorization: Bearer` token
+  ([F18](#f18-lease-tokens)) for *this* sandbox, guest port and generation.
   On failure, answer a fixed `401` and close. On success, forward the bytes
   read so far, then splice both directions until either side closes.
   WebSocket upgrades and streaming need nothing special.
@@ -777,45 +822,25 @@ appears in argv or stdout.
   "base_url": "https://sbx-01.tailnet.ts.net:30001",
   "expires_at": "2026-10-19T12:10:00Z",
   "generation": "1",
-  "headers": {"X-Msb-Lease": "v1.1792244100.…"}
+  "headers": {"Authorization": "Bearer v1.1792243800.…"}
 }}
 ```
 
-**The header cannot be `Authorization`.** Kandev rejects a lease whose
-headers include `Authorization`, `X-Instance-ID`, `Host`, `Cookie`,
-`Set-Cookie`, `Sec-WebSocket-Protocol`, a hop-by-hop header or any
-`Proxy-*` header (`endpoint_transport.go`). It also sets `Authorization` to
-agentctl's own token on every request, after the lease headers.
-
-**Self-healing is the requirement.** Kandev never re-resolves a lease on a
-401: it refreshes only 30 s before `expires_at`. A refused token therefore
-stays refused for up to 10 minutes. Nothing that happens in normal operation
-may invalidate a token Kandev is still using:
-
-- `token = "v1." + valid_until_unix + "." + base64url(HMAC-SHA256(key, name | guest port | created_at | valid_until_unix))`.
-- Bind it to the sandbox **incarnation** (`name` + `created_at`), **not**
-  to `generation`. A VM restart must not invalidate tokens, because Kandev
-  only sees the new generation at its next refresh. A recreated sandbox has
-  a new `created_at`, so old tokens die with the old sandbox.
-- **Grace:** `expires_at` in the lease is now + 10 min, but
-  `valid_until` is now + 15 min. Both are minted and checked on the host's
-  clock, and the 5 min grace absorbs skew between that clock and Kandev's.
-- **Key:** 32 random bytes in `STATE_DIR/kandev/lease.key` (0600), created
-  atomically (`O_EXCL`) by whichever of `lease` and the proxy needs it
-  first. If it is ever replaced, the previous key is kept as
-  `lease.key.prev`, and the proxy accepts both for 15 min. Tokens are
-  stateless (`lease` and the proxy share only the key file), so no IPC is
-  needed and a proxy restart invalidates nothing.
-- The plugin copies `headers` into both Kandev's `http_headers` and
+- `token = "v1." + expiry_unix + "." + base64url(HMAC-SHA256(key, name | guest port | generation | expiry_unix))`.
+  The key is 32 random bytes in `STATE_DIR/kandev/lease.key` (0600),
+  created on first use.
+- These tokens are stateless: `lease` and the proxy share only the key
+  file, so no IPC is needed, and a proxy restart invalidates nothing. The
+  proxy accepts a token until its expiry, with 30 s of clock skew. A
+  changed `generation` (a VM restart) invalidates older tokens.
+- The plugin puts `headers` in both Kandev's `http_headers` and
   `websocket_headers`.
-- `kandev lease` output is now secret-bearing. The plugin treats it so, and
+- `kandev lease` output is now secret-bearing. The plugin treats it so;
   msbctl must not log it.
 
-**Accept:** a token for one sandbox or port is refused on another, and one
-past `valid_until` is refused. After `stop`/`start`, a token minted before
-the restart still works. After `destroy` + re-`provision` of the same env,
-it does not. A token minted under a replaced key is accepted for 15 min.
-Restarting the proxy refuses nothing.
+**Accept:** a token for one sandbox or port is refused on another; a token
+past expiry is refused; after `start`, a token from the previous generation
+is refused.
 
 ### F19: `health` reports TLS
 
@@ -829,9 +854,7 @@ Restarting the proxy refuses nothing.
 
 - With `mode = "proxy"`, `serve.ok` means the proxy is running with a
   certificate installed and `proxy_listen` set.
-- `tls.not_after` drives the plugin's renewal. It re-issues within 30 days,
-  from a background check every 6 h and before every placement, so a
-  certificate never lapses unattended.
+- `tls.not_after` drives the plugin's renewal: it re-issues within 30 days.
 - `issuer_sha256` lets the plugin see that the host carries a certificate
   from its current root, and re-issue after a root change.
 - **Also in the `tailscale` mode:** report `serve.ok = false` when the
