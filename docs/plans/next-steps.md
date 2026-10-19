@@ -171,7 +171,7 @@ The plugin has only actions so far. Build:
 
 ## State (2026-10-19)
 
-- Plugin `0.1.0-dev.8` on local `main`, installed on `kandev.vild.party`
+- Plugin `0.1.0-dev.9` on local `main`, installed on `kandev.vild.party`
   (Kandev v0.97.0; Kandev itself connects out from 192.168.2.10, its name
   resolves to 192.168.2.6). Root trusted there; API URL set by the user.
 - Egress policy there: custom group `lan-llm` = `192.168.2.6:8788` (the
