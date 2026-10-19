@@ -3,6 +3,8 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -83,7 +85,13 @@ func (h *fakeHost) GetSecret(_ context.Context, key string) (string, bool, error
 	return v, ok, nil
 }
 
+// secretKeyPattern is Kandev's rule for plugin secret keys (pluginSecretKeyPattern).
+var secretKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
+
 func (h *fakeHost) SetSecret(_ context.Context, key, value string) error {
+	if !secretKeyPattern.MatchString(key) {
+		return fmt.Errorf("invalid secret key %q", key)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.secrets[key] = value

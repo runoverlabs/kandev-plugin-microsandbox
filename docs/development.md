@@ -30,6 +30,7 @@ make claude-md             # local-only CLAUDE.md pointing at AGENTS.md
 make lint                  # gofmt, go vet, manifest check against Kandev's validator
 make test                  # Go tests
 make test-race             # the same with the race detector (what CI runs)
+make test-ui               # UI: typecheck, build ui/bundle.js, vitest
 make security              # gitleaks, govulncheck
 make verify-package-host   # host-platform tarball + checksums
 make package               # all five platforms, for a release
@@ -50,7 +51,14 @@ internal package of the Kandev module and cannot be imported from here.
 | `internal/sshx/` | SSH transport: the plugin key, host key pinning and scanning, the connection pool, shlex-compatible quoting. |
 | `internal/sshx/sshtest/` | An in-process SSH server standing in for a sandbox host, for tests. |
 | `internal/plugin/` | SDK wiring: Host state and secrets, the `hosts.*` actions, the executor provider RPCs. |
+| `internal/hostsetup/` | Setting a machine up over an admin login (`hosts.setup`): steps, accounts, packages, firewall. |
 | `server/` | `main`: `pluginsdk.Serve`. |
+| `ui/` | The settings pages. `src/` is TypeScript over the host's React and components; `bundle.js` is built (`npm ci`, then `make test-ui` or `make ui/bundle.js`) and not committed. |
+
+The UI resolves `@kandev/plugin-sdk` from the sibling checkout, like the Go
+module. `npm install` hits an npm resolver bug on that linked package
+(`Cannot read properties of null (reading 'edgesOut')`); `npm ci` from the
+committed lockfile works.
 
 Tests never need a real host: the plugin and transport tests run real SSH
 against `sshtest` servers on loopback, answering scripted `msbctl kandev`

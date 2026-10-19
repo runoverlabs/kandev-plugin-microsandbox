@@ -50,6 +50,11 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
   bounded by msbctl's real limit, its 64 KiB provision header: a sandbox's
   egress list gets 32 KiB of it, and a provision that would not fit fails
   with `invalid_config` (`requestTooLarge`) before anything is created.
+- Settings pages: readiness and links on the plugin's own settings page,
+  then **Sandbox hosts** (each host's state and detail, Test, Drain, Remove,
+  set up a new machine with live step progress, or add a set-up one),
+  **Sandbox egress** (groups, defaults, an entry editor) and **Sandbox
+  secrets** (an Add list; a stored value is never shown again).
 - Secrets kept by the plugin (`secrets.list`, `secrets.put`,
   `secrets.remove`): a name, a value in the plugin's secret store, and the
   hosts it may be sent to. Profiles name the ones they use in one `secrets`

@@ -44,6 +44,16 @@ jobs:
           go-version: "1.26.9"
           cache-dependency-path: kandev-plugin-microsandbox/go.sum
 
+      # The settings pages: a TypeScript bundle, built here rather than
+      # committed so the package never carries a stale one.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install UI dependencies
+        working-directory: kandev-plugin-microsandbox
+        run: npm ci --no-audit --no-fund
+
       - name: Check module files are tidy
         working-directory: kandev-plugin-microsandbox
         run: |
@@ -57,6 +67,10 @@ jobs:
       - name: Go tests (race)
         working-directory: kandev-plugin-microsandbox
         run: make test-race
+
+      - name: UI typecheck, bundle and tests
+        working-directory: kandev-plugin-microsandbox
+        run: make test-ui
 
       - name: Verify package
         working-directory: kandev-plugin-microsandbox

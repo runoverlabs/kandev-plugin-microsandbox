@@ -8,8 +8,9 @@
 A Kandev runtime plugin providing a **remote executor**: one microsandbox
 microVM per Kandev session, on sandbox hosts that run msb-manager. The plugin
 is a Go binary Kandev spawns as a gRPC subprocess. It reaches each host with
-`ssh <host> msbctl kandev <verb>` through a forced command. There is no UI
-bundle yet.
+`ssh <host> msbctl kandev <verb>` through a forced command. Its settings
+pages are a TypeScript bundle in `ui/` (Sandbox hosts, Egress, Secrets, and
+an overview on the plugin's own settings page), calling the admin actions.
 
 The design is [docs/plans/implementation-plan.md](docs/plans/implementation-plan.md).
 Its host side (msbctl's `kandev` verbs) lives in msb-manager, not here.
@@ -29,6 +30,7 @@ push in it. It is also the authority on host behaviour. Read
 ```sh
 make lint        # gofmt, go vet, manifest check with Kandev's own validator
 make test        # Go tests (make test-race is what CI runs)
+make test-ui     # typecheck, build ui/bundle.js, vitest (npm ci first)
 make verify-package-host
 ```
 
@@ -45,6 +47,7 @@ Run `make lint && make test-race` before claiming a change is done.
 | `internal/sshx/` | SSH: key, host key pinning, pool, quoting, the one-off admin login |
 | `internal/hostsetup/` | Setting a machine up over an admin login: accounts, packages, firewall, step order; msb-manager specifics come from `internal/msbctl/setup.go` |
 | `internal/plugin/` | SDK wiring, actions, provider RPCs |
+| `ui/` | The settings pages: host components only (`host.ui`, `host.jsx`), actions through `invoke` in `ui/src/api.ts`; pure helpers in `ui/src/model.ts` |
 
 **Nothing outside `internal/msbctl` parses msbctl output or names a verb.
 Nothing in `internal/msbctl` or `internal/sshx` decides placement or policy.**
@@ -127,6 +130,11 @@ Verified in `../kandev` at v0.97.0.
 - **Attach carries no profile**, so no secret values: a stopped sandbox that
   binds secrets cannot be restarted from attach.
 - Kandev puts the session workspace at `/workspace` in the guest.
+- **Plugin secret keys** must match `[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}`
+  (`pluginSecretKeyPattern`); the test fake enforces it.
+- **The UI's `invokeAction` throws Kandev's `ApiError`**, with the plugin's
+  status and parsed JSON body; `ui/src/api.ts` turns it into an
+  `ActionError` once.
 - **An action has 15 seconds** (`pluginActionTimeout`), so anything longer,
   like `hosts.setup`, runs as an in-memory job the page polls.
 - **Kandev passes its own environment to the plugin process** (no

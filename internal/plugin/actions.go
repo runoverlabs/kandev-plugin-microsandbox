@@ -485,7 +485,7 @@ func diagnose(health msbctl.Health, err error, publicKey string) testResult {
 	case msbctl.CodeOf(err) == msbctl.CodeUnsupported:
 		return testResult{Problem: "protocol", Hint: "The host's msbctl speaks a different kandev protocol version than this plugin.", Health: &health}
 	case err != nil:
-		return testResult{Problem: "unavailable", Hint: "msbctl on the host did not return a health report."}
+		return testResult{Problem: "unavailable", Hint: "msbctl on the host did not return a health report. Run `msbctl kandev health` on the host to see why: a config.toml it cannot load, for one."}
 	}
 	result := testResult{OK: health.Usable(), Health: &health}
 	switch {

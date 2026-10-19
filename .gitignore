@@ -4,3 +4,5 @@ bin/
 
 # Local-only agent pointer. AGENTS.md is the committed source of truth.
 CLAUDE.md
+node_modules/
+ui/bundle.js

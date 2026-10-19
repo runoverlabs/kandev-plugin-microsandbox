@@ -1,4 +1,4 @@
-.PHONY: build test test-race fmt vet lint validate-manifest \
+.PHONY: build test test-race test-ui fmt vet lint validate-manifest \
 	security security-secrets security-deps claude-md \
 	package package-host verify-package verify-package-host clean
 
@@ -48,6 +48,13 @@ test:
 test-race:
 	go test -race ./... -count=1
 
+## Builds the bundle first, then runs the UI's unit tests.
+test-ui:
+	npm test
+
+ui/bundle.js: $(wildcard ui/src/*.ts) package.json ui/tsconfig.json
+	npm run build:ui
+
 fmt:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed: $$out"; exit 1; fi
 
@@ -84,14 +91,17 @@ security-secrets:
 security-deps:
 	go run $(GOVULNCHECK) ./...
 
+# The package carries the built bundle and its stylesheet, not the UI's
+# sources or tests.
 define stage
 	rm -rf $(STAGE)
-	mkdir -p $(STAGE)/server
+	mkdir -p $(STAGE)/server $(STAGE)/ui
 	cp manifest.yaml $(STAGE)/manifest.yaml
+	cp ui/bundle.js ui/plugin.css $(STAGE)/ui/
 endef
 
 ## Every platform in manifest.yaml's runtime.executables, packed for release.
-package: validate-manifest
+package: validate-manifest ui/bundle.js
 	$(stage)
 	@for platform in $(PLATFORMS); do \
 		os="$${platform%/*}"; arch="$${platform#*/}"; ext=""; \
@@ -104,7 +114,7 @@ package: validate-manifest
 	@echo "Wrote $(PKG_OUT)"
 
 ## Host-platform-only package, for local iteration.
-package-host: validate-manifest
+package-host: validate-manifest ui/bundle.js
 	$(stage)
 	go build $(RELEASE_FLAGS) -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
 	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
@@ -117,6 +127,9 @@ verify-package: package
 		tar -xzf "$(PKG_OUT)" -C "$$tmp"; \
 		test -f "$$tmp/manifest.yaml"; \
 		test -f "$$tmp/checksums.txt"; \
+		test -f "$$tmp/ui/bundle.js"; \
+		test -f "$$tmp/ui/plugin.css"; \
+		test ! -e "$$tmp/ui/src"; \
 		for platform in $(PLATFORMS); do \
 			os="$${platform%/*}"; arch="$${platform#*/}"; ext=""; \
 			[ "$$os" = windows ] && ext=".exe"; \
@@ -133,8 +146,9 @@ verify-package-host: package-host
 		test -f "$$tmp/manifest.yaml"; \
 		test -f "$$tmp/checksums.txt"; \
 		test -f "$$tmp/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE)"; \
+		test -f "$$tmp/ui/bundle.js"; \
 		(cd "$$tmp" && sha256sum -c checksums.txt)
 	@echo "verify-package-host OK"
 
 clean:
-	rm -rf bin .build $(ID)-*.tar.gz
+	rm -rf bin .build $(ID)-*.tar.gz node_modules

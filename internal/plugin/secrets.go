@@ -22,8 +22,9 @@ import (
 // bound for those hosts only.
 const (
 	secretsStateKey = "secrets"
-	// secretValuePrefix keys each value in the plugin's secret store.
-	secretValuePrefix = "secret/"
+	// secretValuePrefix keys each value in the plugin's secret store, whose
+	// keys Kandev limits to [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}.
+	secretValuePrefix = "secret."
 	secretsVersion    = 1
 	maxSecrets        = 100
 	maxSecretValue    = 16 << 10

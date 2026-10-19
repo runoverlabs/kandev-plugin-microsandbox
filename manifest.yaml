@@ -4,7 +4,7 @@
 # with the pinned Kandev's own validator.
 id: "kandev-plugin-microsandbox"
 api_version: 2
-version: "0.1.0-dev.4"
+version: "0.1.0-dev.8"
 display_name: "microsandbox"
 description: "Run each Kandev session in its own microsandbox microVM on registered sandbox hosts."
 author: "naerymdan"
@@ -27,6 +27,12 @@ runtime:
 # plugin's SSH private key and the root's private key.
 # Changing this set invalidates the operator's approval for every capability;
 # internal/plugin/manifest_test.go pins it.
+# The settings pages: an overview on the plugin's own page, then Sandbox
+# hosts, Egress and Secrets, all calling the admin actions below.
+ui:
+  bundle: "/ui/bundle.js"
+  styles: ["/ui/plugin.css"]
+
 capabilities:
   executor_provider: true
   state: true

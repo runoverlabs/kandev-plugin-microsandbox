@@ -1,0 +1,209 @@
+/*
+ * Styles for the plugin's own settings pages. Host components (cards,
+ * buttons, inputs, tables) carry the active theme; this file only lays them
+ * out, with host CSS variables so light and dark both stay correct.
+ */
+.msb-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 64rem;
+}
+
+.msb-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.msb-card {
+  width: 100%;
+}
+
+.msb-card [data-slot="card-content"],
+.msb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.msb-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.msb-muted {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground, inherit);
+}
+
+.msb-hint {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.msb-mono,
+.msb-code,
+.msb-secret__name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
+.msb-code {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: 0.375rem;
+  background: var(--muted, rgb(0 0 0 / 0.05));
+}
+
+.msb-link {
+  color: var(--primary, inherit);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.msb-links,
+.msb-checklist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.msb-checklist__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.msb-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.8125rem;
+}
+
+.msb-details summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.msb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.msb-field__label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.msb-field__help {
+  font-size: 0.75rem;
+  color: var(--muted-foreground, inherit);
+}
+
+.msb-field__error {
+  font-size: 0.75rem;
+  color: var(--destructive, #b3261e);
+}
+
+.msb-badge--ok {
+  background: var(--primary, #1f7a3a);
+}
+
+.msb-host {
+  border: 1px solid var(--border, rgb(0 0 0 / 0.1));
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.msb-host__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.msb-host__toggle {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+  width: 1rem;
+}
+
+.msb-host__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.msb-host__detail {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.msb-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.msb-facts dt {
+  color: var(--muted-foreground, inherit);
+}
+
+.msb-facts dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.msb-secret {
+  border: 1px solid var(--border, rgb(0 0 0 / 0.1));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.msb-secret__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+/* Under Settings > Plugins in the sidebar, styled like its sub-items. */
+.msb-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0 0.5rem 0 2rem;
+  font-size: 0.8125rem;
+}
+
+.msb-nav .msb-link {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--muted-foreground, inherit);
+  text-decoration: none;
+}
+
+.msb-nav .msb-link:hover {
+  background: var(--accent, rgb(0 0 0 / 0.05));
+  color: var(--foreground, inherit);
+}

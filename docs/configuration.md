@@ -7,10 +7,13 @@ executor profile per project.
 
 The host list is plugin-wide Host state, not plugin settings: the settings
 schema validates only scalars, so a list cannot live there. Every host action
-is **admin-only**. There is no Sandbox Hosts page yet; the actions below are
-what it will call, and they can be invoked over Kandev's plugin action API in
-the meantime (`POST /api/plugins/kandev-plugin-microsandbox/actions/<key>`,
-with any workspace as the action scope).
+is **admin-only**. The plugin's settings pages call the actions below:
+Settings > Plugins > microsandbox shows the Kandev server's readiness and
+links to **Sandbox hosts**, **Sandbox egress** and **Sandbox secrets** (also
+under Plugins in the settings sidebar). The actions can also be invoked over
+Kandev's plugin action API
+(`POST /api/plugins/kandev-plugin-microsandbox/actions/<key>`, with any
+workspace as the action scope).
 
 | Action | Body | Does |
 | --- | --- | --- |
