@@ -12,7 +12,7 @@ item starts with where it stands. Section "State" is where testing stands.
 | 5. msbctl | Written up as Request 5 in [msbctl-feature-request.md](../msbctl-feature-request.md): F22 host facts, F23 `host kandev configure`, F24 `self-update` under the kandev key. |
 | 6. Egress | Done: sizes bounded by msbctl's 64 KiB header; Test's hint gives the exact `allow_extra` line. |
 | 7. Kandev upstream | Not filed: waits for the user's go-ahead. |
-| 8. Smaller items | The test host's egress line is the user's call (see State). New: attach could restart a stopped sandbox with secrets now that their values live in the plugin, if resource state kept the secret names. |
+| 8. Smaller items | Done: the opencode run on alloy, and the Cursed test tasks deleted. New: attach could restart a stopped sandbox with secrets now that their values live in the plugin, if resource state kept the secret names. |
 
 ## Goal
 
@@ -178,18 +178,14 @@ The plugin has only actions so far. Build:
   FreeToken OpenAI-compatible server, no key); defaults `lan-llm`, `opencode`.
   Profile "alloy (node)": `node:22-bookworm-slim` by digest, 2 CPUs, 4 GiB,
   `workspace_gib` 10, 2 h, `agent_config_bundles = ["opencode.config"]`.
-- Host alloy (192.168.2.8): msb-manager 0.5.1. Its `config.toml` now has
-  **two** `allow_extra` lines under `[kandev]` (the bounded one and `["*"]`),
-  which TOML refuses, so msbctl cannot load its config and Test reports
-  `unavailable`. One line must go (the user's call); that is the blocker for
-  the opencode run. Runtime-only firewall rules open 30000–30099 to 192.168.1.121 (this
+- Host alloy (192.168.2.8): msb-manager 0.5.1, `allow_extra = ["*"]`
+  (set by the user), Test passes. The opencode task with the FreeToken
+  model ran end to end in a sandbox there and answered PONG. Runtime-only firewall rules open 30000–30099 to 192.168.1.121 (this
   sandbox) and 192.168.2.10 (Kandev). Test leftovers: `~/kandev-test/mock-agent`,
   the `/etc/hosts` line `kandev-api.home.arpa`, config backups
   `config.toml.bak-*`, `authorized_keys.bak-kandev-*`.
 - Verified for real so far: provision with workspace disk, opencode config
   bundle copied, agentctl handshake through the proxy, an opencode agent turn
   (refused only at the model, by egress), inspect, reaper expiry, purge.
-- Leftover test tasks in the Cursed workspace: "[msb plugin test] opencode
-  ping 2" (REVIEW), "opencode ping" (FAILED), "provision probe" (FAILED).
-  Delete with `POST /api/v1/tasks/delete-preflight` and the confirmation
-  header; their sandboxes expire on their own (task delete leaks, see 7).
+- The Cursed test tasks are deleted; their sandboxes expire on their own
+  (task delete leaks, see 7).
