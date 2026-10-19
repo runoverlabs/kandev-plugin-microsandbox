@@ -25,6 +25,25 @@ func TestQuoteMatchesShlexQuote(t *testing.T) {
 	assert.Equal(t, `msbctl kandev provision 'k-env 1' 'it'"'"'s' '' a=b,c:d/e@f%g+h 'é' '$HOME;rm'`, got)
 }
 
+// The generic verbs' argv as `host serve --kandev` admits them; a name from
+// the record is a plain token, so nothing is quoted.
+func TestGenericVerbCommandLines(t *testing.T) {
+	for argv, want := range map[string]string{
+		"ls":    "msbctl ls --json",
+		"show":  "msbctl show k-6f1c2b9e --json",
+		"stop":  "msbctl stop k-6f1c2b9e --json",
+		"purge": "msbctl purge k-6f1c2b9e -y --json",
+	} {
+		args := map[string][]string{
+			"ls":    {"msbctl", "ls", "--json"},
+			"show":  {"msbctl", "show", "k-6f1c2b9e", "--json"},
+			"stop":  {"msbctl", "stop", "k-6f1c2b9e", "--json"},
+			"purge": {"msbctl", "purge", "k-6f1c2b9e", "-y", "--json"},
+		}[argv]
+		assert.Equal(t, want, sshx.Join(args), argv)
+	}
+}
+
 func TestGenerateKeyRoundTrips(t *testing.T) {
 	private, authorized, err := sshx.GenerateKey()
 	require.NoError(t, err)

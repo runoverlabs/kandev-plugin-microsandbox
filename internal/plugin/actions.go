@@ -403,6 +403,8 @@ func diagnose(health msbctl.Health, err error, publicKey string) testResult {
 		return testResult{Problem: "unreachable", Hint: "The host's SSH server did not answer."}
 	case msbctl.CodeOf(err) == msbctl.CodeDenied:
 		return testResult{Problem: "refused", Hint: "The host refused `msbctl kandev`: authorize the key with --kandev, and check msbctl on the host is recent enough."}
+	case isOutdated(err):
+		return testResult{Problem: "outdated", Hint: "The host's msbctl predates the verbs this plugin uses (its health has no tls). Update msb-manager on the host.", Health: &health}
 	case msbctl.CodeOf(err) == msbctl.CodeUnsupported:
 		return testResult{Problem: "protocol", Hint: "The host's msbctl speaks a different kandev protocol version than this plugin.", Health: &health}
 	case err != nil:
@@ -451,4 +453,9 @@ func (r *Runtime) diagnoseTLS(ctx context.Context, result *testResult, outcome t
 	if r.rootTrusted(root) != nil {
 		set("root_not_trusted", "The Kandev server does not trust the plugin's root yet. Install it (ca.get lists the steps) and restart Kandev.")
 	}
+}
+
+func isOutdated(err error) bool {
+	var e *msbctl.Error
+	return errors.As(err, &e) && e.Reason == msbctl.ReasonOutdated
 }

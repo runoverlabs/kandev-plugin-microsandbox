@@ -69,7 +69,7 @@ func stateOf(d *pluginsdk.ExecutorResourceDescriptor) (resourceState, error) {
 		return resourceState{}, errNoState
 	}
 	var s resourceState
-	if err := json.Unmarshal([]byte(d.GetStateJson()), &s); err != nil || s.Host == "" || s.Env == "" {
+	if err := json.Unmarshal([]byte(d.GetStateJson()), &s); err != nil || s.Host == "" || s.Env == "" || s.SandboxName == "" {
 		return resourceState{}, errNoState
 	}
 	return s, nil
@@ -326,7 +326,10 @@ func findOperation(ctx context.Context, client *msbctl.Client, candidates []host
 		go func() {
 			findCtx, cancel := context.WithTimeout(ctx, hosts.ProbeTimeout)
 			defer cancel()
-			rec, err := client.Find(findCtx, h, operationID)
+			rec, ok, err := client.FindOperation(findCtx, h, operationID)
+			if err == nil && !ok {
+				err = &msbctl.Error{Code: msbctl.CodeNotFound}
+			}
 			answers <- answer{h, rec, err}
 		}()
 	}

@@ -132,14 +132,19 @@ func pluginKey(t *testing.T, r *Runtime) ssh.PublicKey {
 	return key
 }
 
-// msbctlHost answers `msbctl kandev <verb>` by verb.
+// msbctlHost answers `msbctl kandev <verb>` and the generic verbs
+// (`msbctl ls --json`, …) by verb.
 func msbctlHost(replies map[string]sshtest.Reply) sshtest.Handler {
 	return func(command string, _ []byte) sshtest.Reply {
 		fields := strings.Fields(command)
-		if len(fields) < 3 || fields[0] != "msbctl" || fields[1] != "kandev" {
+		if len(fields) < 2 || fields[0] != "msbctl" {
 			return sshtest.Reply{Status: 126}
 		}
-		if reply, ok := replies[fields[2]]; ok {
+		verb := fields[1]
+		if verb == "kandev" && len(fields) > 2 {
+			verb = fields[2]
+		}
+		if reply, ok := replies[verb]; ok {
 			return reply
 		}
 		return sshtest.Reply{Status: 126}
@@ -149,7 +154,7 @@ func msbctlHost(replies map[string]sshtest.Reply) sshtest.Handler {
 const healthyJSON = `{"protocol":1,"msbctl_version":"0.4.0","msb_version":"0.7.7","kvm":true,"enabled":true,
  "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
  "capacity":{"max_sandboxes":12,"sandboxes":0,"max_cpus":32,"cpus":0,"max_memory_mib":98304,"memory_mib":0},
- "serve":{"ok":true}}`
+ "serve":{"ok":true,"mode":"tailscale"},"tls":{"installed":false}}`
 
 func hostBody(name, dest, hostKey string, labels ...string) map[string]any {
 	if labels == nil {

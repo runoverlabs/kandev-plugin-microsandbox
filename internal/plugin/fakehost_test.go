@@ -59,7 +59,13 @@ func (f *fakeMsbctl) handle(command string, stdin []byte) sshtest.Reply {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	args := strings.Fields(command)
-	if len(args) < 3 || args[0] != "msbctl" || args[1] != "kandev" {
+	if len(args) < 2 || args[0] != "msbctl" {
+		return sshtest.Reply{Status: 126}
+	}
+	if args[1] != "kandev" {
+		return f.generic(args[1:])
+	}
+	if len(args) < 3 {
 		return sshtest.Reply{Status: 126}
 	}
 	verb, rest := args[2], args[3:]
@@ -79,30 +85,12 @@ func (f *fakeMsbctl) handle(command string, stdin []byte) sshtest.Reply {
 			"protocol": 1, "kvm": true, "enabled": true, "platform": "linux-amd64",
 			"capacity": map[string]any{"max_sandboxes": max, "sandboxes": used, "max_cpus": 64, "max_memory_mib": 1 << 20},
 			"serve":    map[string]any{"ok": true, "mode": "none"},
+			"tls":      map[string]any{"installed": false},
 		})
-	case "list":
-		var list []map[string]any
-		for env, s := range f.sandboxes {
-			list = append(list, map[string]any{"env": env, "name": s.rec.Name, "state": s.rec.State})
-		}
-		return jsonReply(map[string]any{"sandboxes": list})
 	case "provision":
 		return f.provision(rest[0], stdin)
 	case "agentctl":
 		return f.agentctl(rest[0], stdin)
-	case "inspect":
-		s, ok := f.sandboxes[rest[0]]
-		if !ok {
-			return errReply("not_found")
-		}
-		return jsonReply(map[string]any{"record": s.rec})
-	case "find":
-		for _, s := range f.sandboxes {
-			if s.rec.OperationID == rest[1] {
-				return jsonReply(map[string]any{"record": s.rec})
-			}
-		}
-		return errReply("not_found")
 	case "start":
 		return f.start(rest[0], stdin)
 	case "lease":
@@ -121,9 +109,49 @@ func (f *fakeMsbctl) handle(command string, stdin []byte) sshtest.Reply {
 			ExpiresAt:  time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
 			Generation: fmt.Sprint(s.rec.Generation), Headers: f.leaseHdr,
 		}})
-	case "destroy":
-		delete(f.sandboxes, rest[0])
-		return jsonReply(map[string]any{"destroyed": true})
+	}
+	return sshtest.Reply{Status: 126}
+}
+
+// generic answers the generic verbs exactly as `host serve --kandev` admits
+// them; any other shape is refused with 126, as the real forced command does.
+func (f *fakeMsbctl) generic(args []string) sshtest.Reply {
+	byName := func(name string) (string, *fakeSandbox) {
+		for env, s := range f.sandboxes {
+			if s.rec.Name == name {
+				return env, s
+			}
+		}
+		return "", nil
+	}
+	row := func(s *fakeSandbox) map[string]any {
+		return map[string]any{"name": s.rec.Name, "source": "kandev", "state": "running", "kandev": s.rec}
+	}
+	switch {
+	case len(args) == 2 && args[0] == "ls" && args[1] == "--json":
+		rows := []map[string]any{}
+		for _, s := range f.sandboxes {
+			rows = append(rows, row(s))
+		}
+		return jsonReply(map[string]any{"msbctl": "0.3.0 (git checkout)", "sandboxes": rows})
+	case len(args) == 3 && args[0] == "show" && args[2] == "--json":
+		if _, s := byName(args[1]); s != nil {
+			return jsonReply(row(s))
+		}
+		return errReply("not_found")
+	case len(args) == 3 && args[0] == "stop" && args[2] == "--json":
+		_, s := byName(args[1])
+		if s == nil {
+			return errReply("not_found")
+		}
+		s.rec.State = msbctl.StateStopped
+		return jsonReply(map[string]any{"sandboxes": []any{row(s)}})
+	case len(args) == 4 && args[0] == "purge" && args[2] == "-y" && args[3] == "--json":
+		if env, s := byName(args[1]); s != nil {
+			delete(f.sandboxes, env)
+			return jsonReply(map[string]any{"purged": []string{args[1]}, "absent": []string{}})
+		}
+		return jsonReply(map[string]any{"purged": []string{}, "absent": []string{args[1]}})
 	}
 	return sshtest.Reply{Status: 126}
 }

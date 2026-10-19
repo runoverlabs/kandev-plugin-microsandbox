@@ -83,7 +83,7 @@ func (r *Runtime) AttachExecutorEnvironment(ctx context.Context, req *pluginsdk.
 	if perr != nil {
 		return &pluginsdk.AttachExecutorEnvironmentResponse{Error: perr}, nil
 	}
-	rec, err := res.client.Inspect(ctx, res.host, res.state.Env)
+	rec, err := res.client.Inspect(ctx, res.host, res.state.SandboxName)
 	if err != nil {
 		return &pluginsdk.AttachExecutorEnvironmentResponse{Error: providerFailure(err, "attachFailed")}, nil
 	}
@@ -114,7 +114,7 @@ func (r *Runtime) InspectExecutorEnvironment(ctx context.Context, req *pluginsdk
 		}
 		return &pluginsdk.InspectExecutorEnvironmentResponse{State: state, Reason: perr.GetCode()}, nil
 	}
-	rec, err := res.client.Inspect(ctx, res.host, res.state.Env)
+	rec, err := res.client.Inspect(ctx, res.host, res.state.SandboxName)
 	switch {
 	case msbctl.CodeOf(err) == msbctl.CodeNotFound && err != nil:
 		return &pluginsdk.InspectExecutorEnvironmentResponse{State: "absent", Reason: msbctl.CodeNotFound}, nil
@@ -205,7 +205,7 @@ func (r *Runtime) DestroyExecutorEnvironment(ctx context.Context, req *pluginsdk
 			}
 			return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: perr}, nil
 		}
-		if err := res.client.Destroy(ctx, res.host, s.Env); err != nil {
+		if err := res.client.Destroy(ctx, res.host, s.SandboxName); err != nil {
 			log.Printf("destroy %s on %s: %v", s.Env, s.Host, err)
 			return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: providerFailure(err, "destroyFailed")}, nil
 		}
@@ -222,7 +222,7 @@ func (r *Runtime) DestroyExecutorEnvironment(ctx context.Context, req *pluginsdk
 	found := findOperation(ctx, client, registry.Hosts, op)
 	switch {
 	case found.ok:
-		if err := client.Destroy(ctx, found.host, found.record.Env); err != nil {
+		if err := client.Destroy(ctx, found.host, found.record.Name); err != nil {
 			return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: providerFailure(err, "destroyFailed")}, nil
 		}
 		return &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true}, nil

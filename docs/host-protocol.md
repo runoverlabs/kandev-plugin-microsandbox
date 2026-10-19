@@ -7,7 +7,10 @@ plugin implements it today; what msbctl needs to build is in the
 [msbctl feature request](msbctl-feature-request.md).
 
 **Protocol version: 1.** `health` reports it, and the plugin refuses a host
-reporting any other version rather than guessing. It never gates on
+reporting any other version rather than guessing. It also refuses a
+protocol-1 host whose `health` has no `tls` key: those predate msbctl
+folding `list`, `inspect`, `find`, `stop` and `destroy` into its generic
+verbs (`protocol` did not change), and get the `outdated` diagnosis. It never gates on
 `msbctl_version`: a checkout reports `0.3.0+<sha> (git checkout)`, and the
 first hosts with these verbs run msb-manager `main` ahead of a release.
 
@@ -100,28 +103,44 @@ enforces the same limits again under its own lock at provision time.
 
 Used by: placement, and the Sandbox Hosts page's **Test**.
 
-### `msbctl kandev list`
+### `msbctl ls --json`
+
+Inventory goes through msbctl's generic verbs, which under the plugin's key
+see Kandev's sandboxes only ([change notice](msbctl-kandev-verb-changes.md)):
 
 ```json
-{"sandboxes": [
-  {"env": "<kandev environment id>", "name": "k-<env>", "state": "running",
-   "created_at": "2026-10-17T12:00:00Z", "expires_at": "2026-10-17T20:00:00Z"}
+{"msbctl": "0.3.0 (git checkout)", "sandboxes": [
+  {"name": "k-6f1c2b9e", "source": "kandev", "state": "running",
+   "kandev": {"env": "6f1c2b9e", "name": "k-6f1c2b9e", "operation_id": "op-1",
+              "state": "running", "created_at": "…", "expires_at": "…", "…": "the rest of the record"}}
 ]}
 ```
 
-Every kandev entry on the host, and nothing else: the operator's own
-sandboxes are never listed. `state` is `creating`, `running`, `stopped` or
-`absent`.
-
-Used by: **Remove** on the Sandbox Hosts page, which refuses while a host
-still lists sandboxes.
+The plugin reads each row's `kandev` record and its `kandev.state`, never
+the row's top-level `state`, which is msb's own view and does not know
+`creating`. **Remove** on the Sandbox Hosts page refuses while a host still
+lists sandboxes. Lost provision replies are resolved by filtering this list
+on `kandev.operation_id`: found on a host, absent once every host answered,
+unknown while any host did not.
 
 ## Session verbs
 
-`provision`, `agentctl`, `inspect`, `find`, `start`, `lease` and `destroy`
-are built on msb-manager `main` and called by the plugin as described in the
-[msbctl feature request](msbctl-feature-request.md) (F7–F12). They are
-implemented in `internal/msbctl/sandbox.go`. Secret values, registry
+| Purpose | Command line | Addressed by |
+| --- | --- | --- |
+| create | `msbctl kandev provision ENV` (stdin) | env id |
+| install and start agentctl | `msbctl kandev agentctl ENV` (stdin + binary) | env id |
+| restart a stopped VM | `msbctl kandev start ENV` (stdin) | env id |
+| lease a port | `msbctl kandev lease ENV PORT` | env id |
+| inspect | `msbctl show NAME --json` → its `kandev` record | name |
+| stop | `msbctl stop NAME --json` → `sandboxes[0].kandev` | name |
+| remove | `msbctl purge NAME -y --json`; exit 0 = gone, whether or not it existed | name |
+
+`NAME` is always the record's `name`, stored in the resource state, never
+derived from the env id. The argv shapes are exact: `host serve --kandev`
+refuses anything near them with exit 126. The documents are in the
+[msbctl feature request](msbctl-feature-request.md) (F7–F12) and the
+[change notice](msbctl-kandev-verb-changes.md); the code is
+`internal/msbctl/sandbox.go`. Secret values, registry
 credentials, the bootstrap nonce and the agentctl binary go on stdin: one
 JSON header line, then for `agentctl` exactly `size` bytes. The plugin
 refuses a `lease` whose `headers` include a name Kandev refuses in a lease
@@ -155,5 +174,6 @@ is sent once, on stdin, and is never in argv or any output.
 
 ## Verbs still to define
 
-`stop`, `expiry` and `reap` are built on the host but not called by the
-plugin yet.
+`kandev expiry` and `stop` are built and wrapped, but not called by the
+plugin yet. `reap` and `proxy` are the host's own (`msbctl host kandev …`)
+and refused to the plugin's key.

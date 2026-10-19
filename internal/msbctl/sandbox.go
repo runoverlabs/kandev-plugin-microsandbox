@@ -141,14 +141,76 @@ func (c *Client) Agentctl(ctx context.Context, h hosts.Host, env string, req Age
 	return c.record(ctx, h, []string{"agentctl", env}, io.MultiReader(head, io.LimitReader(binary, req.Size)))
 }
 
-// Inspect runs `msbctl kandev inspect ENV`, which checks agentctl live.
-func (c *Client) Inspect(ctx context.Context, h hosts.Host, env string) (Record, error) {
-	return c.record(ctx, h, []string{"inspect", env}, nil)
+// Inventory and removal go through msbctl's generic verbs, which under the
+// plugin's key see Kandev's sandboxes only. They take the sandbox NAME from
+// the record, never one derived from the env id: long or mixed-case ids
+// map to a hash on the host. The argv shapes are exact; `host serve
+// --kandev` refuses anything near them.
+
+// sandboxRow is one row of `ls --json` and the document of `show --json`.
+type sandboxRow struct {
+	Name   string  `json:"name"`
+	Kandev *Record `json:"kandev"`
 }
 
-// Find runs `msbctl kandev find --operation OP`.
-func (c *Client) Find(ctx context.Context, h hosts.Host, operationID string) (Record, error) {
-	return c.record(ctx, h, []string{"find", "--operation", operationID}, nil)
+// List runs `msbctl ls --json` and returns every Kandev sandbox's record.
+func (c *Client) List(ctx context.Context, h hosts.Host) ([]Record, error) {
+	var out struct {
+		Sandboxes []sandboxRow `json:"sandboxes"`
+	}
+	if err := c.generic(ctx, h, []string{"ls", "--json"}, &out); err != nil {
+		return nil, err
+	}
+	records := make([]Record, 0, len(out.Sandboxes))
+	for _, row := range out.Sandboxes {
+		if row.Kandev != nil && row.Kandev.Name != "" {
+			records = append(records, *row.Kandev)
+		}
+	}
+	return records, nil
+}
+
+// Inspect runs `msbctl show NAME --json`, which checks agentctl live. A
+// name with no Kandev sandbox is `not_found`.
+func (c *Client) Inspect(ctx context.Context, h hosts.Host, name string) (Record, error) {
+	var out sandboxRow
+	if err := c.generic(ctx, h, []string{"show", name, "--json"}, &out); err != nil {
+		return Record{}, err
+	}
+	if out.Kandev == nil || out.Kandev.Name == "" {
+		return Record{}, &Error{Code: CodeUnavailable}
+	}
+	return *out.Kandev, nil
+}
+
+// FindOperation looks for the sandbox an operation created, in `ls --json`.
+// found is false only when the host answered and nothing matched; an error
+// means the host could not say.
+func (c *Client) FindOperation(ctx context.Context, h hosts.Host, operationID string) (Record, bool, error) {
+	records, err := c.List(ctx, h)
+	if err != nil {
+		return Record{}, false, err
+	}
+	for _, r := range records {
+		if r.OperationID == operationID {
+			return r, true, nil
+		}
+	}
+	return Record{}, false, nil
+}
+
+// Stop runs `msbctl stop NAME --json`; the disk is kept.
+func (c *Client) Stop(ctx context.Context, h hosts.Host, name string) (Record, error) {
+	var out struct {
+		Sandboxes []sandboxRow `json:"sandboxes"`
+	}
+	if err := c.generic(ctx, h, []string{"stop", name, "--json"}, &out); err != nil {
+		return Record{}, err
+	}
+	if len(out.Sandboxes) == 0 || out.Sandboxes[0].Kandev == nil {
+		return Record{}, &Error{Code: CodeUnavailable}
+	}
+	return *out.Sandboxes[0].Kandev, nil
 }
 
 // Start runs `msbctl kandev start ENV` with exactly the secrets the sandbox
@@ -178,17 +240,13 @@ func (c *Client) Lease(ctx context.Context, h hosts.Host, env string, port int) 
 	return *out.Lease, nil
 }
 
-// Destroy runs `msbctl kandev destroy ENV`. Success includes "was already
-// gone".
-func (c *Client) Destroy(ctx context.Context, h hosts.Host, env string) error {
+// Destroy runs `msbctl purge NAME -y --json`. Exit 0 means the sandbox is
+// gone, whether this call removed it or it already was; the document's
+// purged/absent split is not needed.
+func (c *Client) Destroy(ctx context.Context, h hosts.Host, name string) error {
 	var out struct {
-		Destroyed bool `json:"destroyed"`
+		Purged []string `json:"purged"`
+		Absent []string `json:"absent"`
 	}
-	if err := c.call(ctx, h, []string{"destroy", env}, nil, &out); err != nil {
-		return err
-	}
-	if !out.Destroyed {
-		return &Error{Code: CodeUnavailable}
-	}
-	return nil
+	return c.generic(ctx, h, []string{"purge", name, "-y", "--json"}, &out)
 }

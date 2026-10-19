@@ -38,7 +38,7 @@ func (f *fakeRunner) Run(_ context.Context, _ hosts.Host, args []string, stdin i
 const healthy = `{"protocol":1,"msbctl_version":"0.4.0","msb_version":"0.7.7","kvm":true,"enabled":true,
  "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
  "capacity":{"max_sandboxes":12,"sandboxes":3,"max_cpus":32,"cpus":8,"max_memory_mib":98304,"memory_mib":16384},
- "serve":{"ok":true,"mode":"tailscale"}}`
+ "serve":{"ok":true,"mode":"tailscale"},"tls":{"installed":false}}`
 
 func TestHealthDecodesAndSendsVerb(t *testing.T) {
 	runner := &fakeRunner{reply: reply{stdout: healthy}}
@@ -54,16 +54,30 @@ func TestHealthDecodesAndSendsVerb(t *testing.T) {
 }
 
 func TestHealthRefusesOtherProtocolVersions(t *testing.T) {
-	runner := &fakeRunner{reply: reply{stdout: `{"protocol":2,"kvm":true,"enabled":true,"serve":{"ok":true}}`}}
+	runner := &fakeRunner{reply: reply{stdout: `{"protocol":2,"kvm":true,"enabled":true,"serve":{"ok":true},"tls":{"installed":false}}`}}
 	_, err := New(runner).Health(context.Background(), hosts.Host{})
 	assert.Equal(t, CodeUnsupported, CodeOf(err))
+	var e *Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, ReasonProtocol, e.Reason)
+}
+
+// protocol stayed 1 when msbctl folded five kandev verbs into its generic
+// ones; health.tls arrived with that change and marks a current host.
+func TestHealthRefusesAHostThatPredatesTheGenericVerbs(t *testing.T) {
+	runner := &fakeRunner{reply: reply{stdout: `{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":true}}`}}
+	_, err := New(runner).Health(context.Background(), hosts.Host{})
+	var e *Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, CodeUnsupported, e.Code)
+	assert.Equal(t, ReasonOutdated, e.Reason)
 }
 
 func TestCapacityRequiresAUsableHost(t *testing.T) {
 	for _, body := range []string{
-		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true}}`,
-		`{"protocol":1,"kvm":true,"enabled":false,"serve":{"ok":true}}`,
-		`{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":false}}`,
+		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true},"tls":{"installed":false}}`,
+		`{"protocol":1,"kvm":true,"enabled":false,"serve":{"ok":true},"tls":{"installed":false}}`,
+		`{"protocol":1,"kvm":true,"enabled":true,"serve":{"ok":false},"tls":{"installed":false}}`,
 	} {
 		_, err := New(&fakeRunner{reply: reply{stdout: body}}).Capacity(context.Background(), hosts.Host{})
 		assert.Equal(t, CodeUnavailable, CodeOf(err), body)
@@ -111,13 +125,57 @@ func TestTransportFailureIsUnreachable(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
-func TestListDecodes(t *testing.T) {
-	runner := &fakeRunner{reply: reply{stdout: `{"sandboxes":[{"env":"env-1","name":"k-env-1","state":"running"}]}`}}
+func TestListReadsTheKandevRecords(t *testing.T) {
+	runner := &fakeRunner{reply: reply{stdout: `{"msbctl":"0.3.0 (git checkout)","sandboxes":[
+	  {"name":"k-env-1","source":"kandev","state":"running","kandev":{"env":"env-1","name":"k-env-1","operation_id":"op-1","state":"creating"}},
+	  {"name":"odd","source":"folder","state":"running"}]}`}}
 	list, err := New(runner).List(context.Background(), hosts.Host{})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"msbctl", "kandev", "list"}, runner.argv)
-	require.Len(t, list, 1)
+	require.Len(t, list, 1, "a row without a kandev record is not Kandev's")
 	assert.Equal(t, "k-env-1", list[0].Name)
+	assert.Equal(t, StateCreating, list[0].State, "kandev.state, not the row's msb state")
+}
+
+// The exact argv shapes `host serve --kandev` admits for the generic verbs.
+// Anything near them is refused with 126 on the host.
+func TestGenericVerbArgvShapes(t *testing.T) {
+	runner := &fakeRunner{}
+	c := New(runner)
+	ctx := context.Background()
+	runner.reply = reply{stdout: `{"sandboxes":[]}`}
+	_, _ = c.List(ctx, hosts.Host{})
+	assert.Equal(t, []string{"msbctl", "ls", "--json"}, runner.argv)
+	runner.reply = reply{stdout: `{"name":"k-1","kandev":{"name":"k-1"}}`}
+	_, _ = c.Inspect(ctx, hosts.Host{}, "k-1")
+	assert.Equal(t, []string{"msbctl", "show", "k-1", "--json"}, runner.argv)
+	runner.reply = reply{stdout: `{"sandboxes":[{"name":"k-1","kandev":{"name":"k-1","state":"stopped"}}]}`}
+	rec, err := c.Stop(ctx, hosts.Host{}, "k-1")
+	require.NoError(t, err)
+	assert.Equal(t, StateStopped, rec.State)
+	assert.Equal(t, []string{"msbctl", "stop", "k-1", "--json"}, runner.argv)
+	runner.reply = reply{stdout: `{"purged":[],"absent":["k-1"]}`}
+	assert.NoError(t, c.Destroy(ctx, hosts.Host{}, "k-1"), "purge of nothing is success")
+	assert.Equal(t, []string{"msbctl", "purge", "k-1", "-y", "--json"}, runner.argv)
+}
+
+func TestFindOperationAndShowNotFound(t *testing.T) {
+	runner := &fakeRunner{reply: reply{stdout: `{"sandboxes":[{"name":"k-a","kandev":{"name":"k-a","operation_id":"op-a"}}]}`}}
+	c := New(runner)
+	rec, found, err := c.FindOperation(context.Background(), hosts.Host{}, "op-a")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "k-a", rec.Name)
+	_, found, err = c.FindOperation(context.Background(), hosts.Host{}, "op-b")
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	runner.reply = reply{stdout: "", status: 1}
+	_, _, err = c.FindOperation(context.Background(), hosts.Host{}, "op-a")
+	assert.Error(t, err, "a host that cannot answer is not 'not found'")
+
+	runner.reply = reply{stdout: `{"error":{"code":"not_found"}}`, status: 3}
+	_, err = c.Inspect(context.Background(), hosts.Host{}, "k-x")
+	assert.Equal(t, CodeNotFound, CodeOf(err))
 }
 
 func TestHealthReadsProxyAndTLS(t *testing.T) {
@@ -133,7 +191,8 @@ func TestHealthReadsProxyAndTLS(t *testing.T) {
 
 	health, err = New(&fakeRunner{reply: reply{stdout: healthy}}).Health(context.Background(), hosts.Host{})
 	require.NoError(t, err)
-	assert.Nil(t, health.TLS, "hosts without the proxy report no tls")
+	require.NotNil(t, health.TLS)
+	assert.False(t, health.TLS.Installed, "a host without the proxy reports tls.installed false")
 }
 
 func TestTLSInstallSendsTheKeyOnStdinOnly(t *testing.T) {

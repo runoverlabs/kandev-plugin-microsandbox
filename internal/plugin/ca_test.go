@@ -41,9 +41,7 @@ func (p *proxyHost) handle(command string, stdin []byte) sshtest.Reply {
 			"capacity": map[string]any{"max_sandboxes": 4, "max_cpus": 16, "max_memory_mib": 32768},
 			"serve":    map[string]any{"ok": p.mode != msbctl.ServeProxy || p.tls.Installed, "mode": p.mode, "running": true},
 		}
-		if p.mode == msbctl.ServeProxy {
-			body["tls"] = p.tls
-		}
+		body["tls"] = p.tls // every current host reports tls, proxy or not
 		out, _ := json.Marshal(body)
 		return sshtest.Reply{Stdout: string(out)}
 	case "msbctl kandev tls install":

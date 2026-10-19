@@ -140,6 +140,13 @@ What the plugin has to adopt. Each one is also in place below.
 
 ### Plugin review of request 2 (2026-10-19): two blockers
 
+**Still present after [PR #62](https://github.com/runoverlabs/sandbox-manager/pull/62)
+was merged** (checked in its diff on 2026-10-19): `lease` returns
+`{"Authorization": "Bearer …"}`, and `kandev_token()` HMACs `name | guest port
+| generation | expiry`. Until both change, `serve = "proxy"` cannot work with
+Kandev; the plugin refuses such a lease with `unavailable` rather than hand
+Kandev one it would reject.
+
 Changes 1–5 and 7–11 are fine; the plugin already sends the leaf followed by
 the root, real subjectAltNames, an unencrypted PKCS#8 key, and reads
 `{"installed": false}`. **Change 6 and the token design in F18 must be

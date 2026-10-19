@@ -87,6 +87,7 @@ background pass every 6 hours and on every **Test**. A host whose
 | `host_key_mismatch` | The host presented a different key than the pinned one. |
 | `unreachable` | No answer from the host's SSH server. |
 | `protocol` | msbctl speaks a different host protocol version. |
+| `outdated` | msbctl on the host predates the verbs this plugin uses. Update msb-manager there. |
 | `disabled` | `[kandev] enabled` is not true in the host's msbctl config. |
 | `no_kvm` | `/dev/kvm` is missing on the host. |
 | `no_data_path` | The host's HTTPS front end for sandboxes is not up (for `serve = "tailscale"`: tailscaled is not running with a DNS name). |

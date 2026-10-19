@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -149,7 +150,7 @@ func TestTestDiagnoses(t *testing.T) {
 		{"refused by forced command", map[string]sshtest.Reply{}, "refused"},
 		{"disabled", map[string]sshtest.Reply{"health": {Stdout: strings.Replace(healthyJSON, `"enabled":true`, `"enabled":false`, 1)}}, "disabled"},
 		{"no kvm", map[string]sshtest.Reply{"health": {Stdout: strings.Replace(healthyJSON, `"kvm":true`, `"kvm":false`, 1)}}, "no_kvm"},
-		{"no data path", map[string]sshtest.Reply{"health": {Stdout: strings.Replace(healthyJSON, `"serve":{"ok":true}`, `"serve":{"ok":false}`, 1)}}, "no_data_path"},
+		{"no data path", map[string]sshtest.Reply{"health": {Stdout: strings.Replace(healthyJSON, `"serve":{"ok":true,`, `"serve":{"ok":false,`, 1)}}, "no_data_path"},
 		{"protocol", map[string]sshtest.Reply{"health": {Stdout: strings.Replace(healthyJSON, `"protocol":1`, `"protocol":2`, 1)}}, "protocol"},
 		{"broken msbctl", map[string]sshtest.Reply{"health": {Stdout: "boom", Status: 1}}, "unavailable"},
 	}
@@ -187,8 +188,8 @@ func TestTestDiagnosesKeyProblems(t *testing.T) {
 func TestRemove(t *testing.T) {
 	r := newRuntime(t, newFakeHost())
 	key := pluginKey(t, r)
-	busy := sshtest.Start(t, key, msbctlHost(map[string]sshtest.Reply{"list": {Stdout: `{"sandboxes":[{"env":"e1","name":"k-e1","state":"running"}]}`}}))
-	idle := sshtest.Start(t, key, msbctlHost(map[string]sshtest.Reply{"list": {Stdout: `{"sandboxes":[]}`}}))
+	busy := sshtest.Start(t, key, msbctlHost(map[string]sshtest.Reply{"ls": {Stdout: `{"msbctl":"0.3.0","sandboxes":[{"name":"k-e1","source":"kandev","state":"running","kandev":{"env":"e1","name":"k-e1","state":"running"}}]}`}}))
+	idle := sshtest.Start(t, key, msbctlHost(map[string]sshtest.Reply{"ls": {Stdout: `{"msbctl":"0.3.0","sandboxes":[]}`}}))
 	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("busy", busy.Dest("msb"), busy.HostKey))))
 	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("idle", idle.Dest("msb"), idle.HostKey))))
 	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("gone", "msb@"+closedAddress(t), idle.HostKey))))
@@ -227,4 +228,23 @@ func closedAddress(t *testing.T) string {
 	address := listener.Addr().String()
 	require.NoError(t, listener.Close())
 	return address
+}
+
+// A host on protocol 1 without health.tls still has the old kandev verbs:
+// Test names the fix, and placement never picks it.
+func TestOutdatedHostIsDiagnosedAndNeverPlaced(t *testing.T) {
+	r := newRuntime(t, newFakeHost())
+	old := strings.Replace(healthyJSON, `,"tls":{"installed":false}`, ``, 1)
+	server := sshtest.Start(t, pluginKey(t, r), msbctlHost(map[string]sshtest.Reply{"health": {Stdout: old}}))
+	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey, "default"))))
+	_, body := call(t, r, ActionHostsTest, map[string]any{"name": "sbx-01"})
+	assert.Equal(t, false, body["ok"])
+	assert.Equal(t, "outdated", body["problem"])
+
+	client, err := r.client(t.Context())
+	require.NoError(t, err)
+	registry, err := r.loadRegistry(t.Context())
+	require.NoError(t, err)
+	_, err = hosts.Place(t.Context(), registry.Hosts, placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
+	assert.ErrorIs(t, err, hosts.ErrUnreachable, "an outdated host is not a candidate")
 }

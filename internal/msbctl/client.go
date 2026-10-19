@@ -62,7 +62,16 @@ const maxRetryAfterSeconds = 600
 type Error struct {
 	Code              string
 	RetryAfterSeconds int
+	// Reason refines `unsupported` from health; it is the plugin's own
+	// label, never host text.
+	Reason string
 }
+
+// Reasons a host's health is unsupported.
+const (
+	ReasonProtocol = "protocol" // another protocol version
+	ReasonOutdated = "outdated" // protocol 1, but msbctl predates the generic verbs
+)
 
 func (e *Error) Error() string { return "msbctl kandev: " + e.Code }
 
@@ -138,7 +147,13 @@ func (c *Client) Health(ctx context.Context, h hosts.Host) (Health, error) {
 		return Health{}, err
 	}
 	if out.Protocol != ProtocolVersion {
-		return out, &Error{Code: CodeUnsupported}
+		return out, &Error{Code: CodeUnsupported, Reason: ReasonProtocol}
+	}
+	// `protocol` did not change when msbctl folded list, inspect, find,
+	// stop and destroy into its generic verbs; `health.tls` shipped with
+	// that change, so its absence marks a host that still has the old verbs.
+	if out.TLS == nil {
+		return out, &Error{Code: CodeUnsupported, Reason: ReasonOutdated}
 	}
 	return out, nil
 }
@@ -154,26 +169,6 @@ func (c *Client) Capacity(ctx context.Context, h hosts.Host) (hosts.Capacity, er
 		return hosts.Capacity{}, &Error{Code: CodeUnavailable}
 	}
 	return health.Capacity, nil
-}
-
-// Sandbox is one kandev entry in a host's inventory.
-type Sandbox struct {
-	Env       string `json:"env"`
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	CreatedAt string `json:"created_at"`
-	ExpiresAt string `json:"expires_at"`
-}
-
-// List runs `msbctl kandev list`.
-func (c *Client) List(ctx context.Context, h hosts.Host) ([]Sandbox, error) {
-	var out struct {
-		Sandboxes []Sandbox `json:"sandboxes"`
-	}
-	if err := c.call(ctx, h, []string{"list"}, nil, &out); err != nil {
-		return nil, err
-	}
-	return out.Sandboxes, nil
 }
 
 // TLSInstall runs `msbctl kandev tls install`, sending the certificate chain
@@ -198,7 +193,16 @@ func (c *Client) TLSInstall(ctx context.Context, h hosts.Host, chainPEM, keyPEM 
 
 // call runs `msbctl kandev <args>` and decodes its one JSON document.
 func (c *Client) call(ctx context.Context, h hosts.Host, args []string, stdin io.Reader, out any) error {
-	argv := append([]string{"msbctl", "kandev"}, args...)
+	return c.run(ctx, h, append([]string{"msbctl", "kandev"}, args...), stdin, out)
+}
+
+// generic runs one of msbctl's generic verbs (`msbctl <args>`), which share
+// the kandev verbs' output contract under the plugin's key.
+func (c *Client) generic(ctx context.Context, h hosts.Host, args []string, out any) error {
+	return c.run(ctx, h, append([]string{"msbctl"}, args...), nil, out)
+}
+
+func (c *Client) run(ctx context.Context, h hosts.Host, argv []string, stdin io.Reader, out any) error {
 	stdout, status, err := c.runner.Run(ctx, h, argv, stdin)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
