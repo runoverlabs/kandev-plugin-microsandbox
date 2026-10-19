@@ -122,6 +122,11 @@ func validSuffix(d string) bool {
 	return true
 }
 
+// noDNS is the only DNS domain a root without DNS suffixes permits: the
+// TLD RFC 6761 reserves so that it never resolves. A suffix entered by the
+// operator has at least two labels, so it can never be this.
+const noDNS = "invalid"
+
 // Root is a loaded certificate authority.
 type Root struct {
 	Cert *x509.Certificate
@@ -159,6 +164,12 @@ func NewRoot(c Constraints, now time.Time) (*Root, string, string, error) {
 		PermittedDNSDomainsCritical: true,
 		PermittedDNSDomains:         c.DNSSuffixes,
 		PermittedIPRanges:           ranges,
+	}
+	if len(c.DNSSuffixes) == 0 {
+		// With only address ranges, forbid every DNS name: a name type with
+		// no constraint is unconstrained, so the root could otherwise certify
+		// any name at all. Only noDNS is permitted, which never resolves.
+		template.PermittedDNSDomains = []string{noDNS}
 	}
 	if len(ranges) == 0 {
 		// With only DNS constraints, forbid every address explicitly: an
@@ -220,7 +231,12 @@ func (r *Root) PEM() string { return encodeCert(r.Cert.Raw) }
 
 // Constraints reads back what the root permits.
 func (r *Root) Constraints() Constraints {
-	c := Constraints{DNSSuffixes: append([]string(nil), r.Cert.PermittedDNSDomains...)}
+	var c Constraints
+	for _, d := range r.Cert.PermittedDNSDomains {
+		if d != noDNS {
+			c.DNSSuffixes = append(c.DNSSuffixes, d)
+		}
+	}
 	for _, n := range r.Cert.PermittedIPRanges {
 		c.CIDRs = append(c.CIDRs, n.String())
 	}
@@ -239,7 +255,7 @@ func (r *Root) Permits(host string) bool {
 		}
 		return false
 	}
-	for _, d := range r.Cert.PermittedDNSDomains {
+	for _, d := range r.Constraints().DNSSuffixes {
 		if host == d || strings.HasSuffix(host, "."+d) {
 			return true
 		}

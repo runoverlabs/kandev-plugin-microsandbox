@@ -94,15 +94,25 @@ func TestIssueHostByAddress(t *testing.T) {
 	assert.Equal(t, "100.64.0.7", leaf.IPAddresses[0].String())
 	_, err = root.IssueHost("10.0.0.1", now)
 	assert.ErrorIs(t, err, ErrNotPermitted)
-	_, err = root.IssueHost("sbx-01.tailnet.ts.net", now)
-	assert.ErrorIs(t, err, ErrNotPermitted)
+	for _, host := range []string{"sbx-01.tailnet.ts.net", "x.invalid", "invalid"} {
+		_, err = root.IssueHost(host, now)
+		assert.ErrorIs(t, err, ErrNotPermitted, host)
+	}
+	assert.Equal(t, Constraints{CIDRs: []string{"100.64.0.0/10"}}, root.Constraints(), "the sentinel is not shown")
 }
 
 // The point of the constraints: even with the root key, a certificate for
 // another name does not verify. This signs one directly, bypassing
 // IssueHost's own check, and asks Go's verifier.
 func TestALeakedRootKeyCannotImpersonateOtherNames(t *testing.T) {
-	root, _, _ := newRoot(t, tailnet())
+	for _, c := range []Constraints{tailnet(), {CIDRs: []string{"192.168.2.8/32"}}} {
+		root, _, _ := newRoot(t, c)
+		assertForgeriesRefused(t, root)
+	}
+}
+
+func assertForgeriesRefused(t *testing.T, root *Root) {
+	t.Helper()
 	pool := x509.NewCertPool()
 	pool.AddCert(root.Cert)
 	for _, forged := range []*x509.Certificate{
