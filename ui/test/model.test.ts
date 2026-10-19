@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMiB, hostBadge, olderVersion, hostDetail, parseDestination, readinessTone, splitList, stepTone, type HostView } from "../src/model";
+import { formatMiB, hostBadge, olderVersion, proxyStale, hostDetail, parseDestination, readinessTone, splitList, stepTone, type HostView } from "../src/model";
 
 const base: HostView = {
   name: "sbx-01", ssh: "msb@sbx-01.example.com", host_key: "ssh-ed25519 AAAA", base_url: "https://sbx-01.example.com",
@@ -73,6 +73,17 @@ describe("helpers", () => {
     expect(olderVersion("0.6.0", "0.6.0")).toBe(false);
     expect(olderVersion("0.10.0", "0.9.9")).toBe(false);
     expect(olderVersion("", "0.6.0")).toBe(false);
+  });
+
+  it("spots a proxy that missed an update", () => {
+    const at = (msbctl: string, proxy: string | undefined, mode = "proxy"): HostView => ({
+      ...base,
+      status: { ok: true, checked_at: "x", health: { msbctl_version: msbctl, serve: { mode, running: true, ...(proxy === undefined ? {} : { version: proxy }) } } },
+    });
+    expect(proxyStale(at("0.6.1", "0.6.1"))).toBe(false);
+    expect(proxyStale(at("0.6.1", undefined))).toBe(true);
+    expect(proxyStale(at("0.7.0", "0.6.1"))).toBe(true);
+    expect(proxyStale(at("0.6.1", undefined, "tailscale"))).toBe(false);
   });
 
   it("maps states to tones", () => {

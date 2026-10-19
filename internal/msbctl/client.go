@@ -166,7 +166,7 @@ func reportedText(s string) string {
 }
 
 func (h *Health) clean() {
-	for _, s := range []*string{&h.MsbctlVersion, &h.MsbVersion, &h.Platform} {
+	for _, s := range []*string{&h.MsbctlVersion, &h.MsbVersion, &h.Platform, &h.Serve.Version} {
 		*s = reportedText(*s)
 	}
 	if h.Host != nil {
@@ -199,6 +199,8 @@ type ServeStatus struct {
 	Mode    string `json:"mode"`              // "proxy", "tailscale" or "none"
 	Listen  string `json:"listen,omitempty"`  // proxy: the address its TLS ports bind
 	Running bool   `json:"running,omitempty"` // proxy: the service is up
+	// Version is the running proxy's release (0.6.1); "" for an older one.
+	Version string `json:"version,omitempty"`
 }
 
 // ServeProxy is the mode where msbctl terminates TLS itself, with a

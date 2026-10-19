@@ -20,7 +20,7 @@ const plantedAdminPassword = "planted-admin-pw-5e7a"
 
 // setupHealth is what a freshly set-up host reports: the proxy is
 // configured and waits for its certificate.
-const setupHealth = `{"protocol":1,"msbctl_version":"0.6.0","msb_version":"0.7.7","kvm":true,"enabled":true,
+const setupHealth = `{"protocol":1,"msbctl_version":"0.6.1","msb_version":"0.7.7","kvm":true,"enabled":true,
 "platform":"linux-amd64","base_url":"https://sbx-01.tailnet.ts.net",
 "capacity":{"max_sandboxes":12,"sandboxes":0,"max_cpus":32,"cpus":0,"max_memory_mib":98304,"memory_mib":0},
 "serve":{"ok":false,"mode":"proxy","listen":"10.0.1.23","running":true},"tls":{"installed":false},
@@ -39,7 +39,7 @@ func setUpMachine(command string, stdin []byte) sshtest.Reply {
 			"has_git=1\nhas_curl=1\nhas_tar=1\nhas_sha256sum=1\nhas_systemctl=1\nhas_loginctl=1\nhas_apt-get=1\n" +
 			"ssh_connection=203.0.113.9 50022 10.0.1.23 22\n"}
 	case strings.Contains(script, msbctl.VersionsScript()):
-		return sshtest.Reply{Stdout: "msb=msb 0.7.7\nmsbctl=msbctl 0.6.0\n"}
+		return sshtest.Reply{Stdout: "msb=msb 0.7.7\nmsbctl=msbctl 0.6.1\n"}
 	case strings.Contains(script, "'configure'"):
 		return sshtest.Reply{Stdout: `{"changed": [], "kandev": {}}`}
 	case strings.Contains(script, "msbctl kandev health"):

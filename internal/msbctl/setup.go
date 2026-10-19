@@ -37,12 +37,12 @@ var (
 		URL:     "https://github.com/superradcompany/microsandbox/releases/download/v0.7.7/install.sh",
 		SHA256:  "767df6954e09fec9bf8276cc2858fc9038024b3a22fa4740572620370eb719f4",
 	}
-	// 0.6.0 is the first with `host kandev configure` (F23), which setup
-	// writes [kandev] with. Its get.sh is byte-identical to 0.5.1's.
+	// 0.6.1: `host kandev configure` (F23, since 0.6.0) for setup, and an
+	// update that restarts the proxy onto the new release (F25).
 	ManagerPin = Pin{
-		Version: "0.6.0",
-		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.6.0/get.sh",
-		SHA256:  "a676bee14708d60a48f337602608674986cdb4da11c2494ac4e758130894151d",
+		Version: "0.6.1",
+		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.6.1/get.sh",
+		SHA256:  "c639ed0b4d9f23a934cff95702168ff8ad98cb0b7aa1b49e53ee9ea5bce4fa78",
 	}
 )
 
@@ -235,10 +235,55 @@ func (h Health) CanSelfUpdate() bool {
 	return h.MsbctlVersion != "" && !Older(h.MsbctlVersion, SelfUpdateVersion)
 }
 
-// Updated is self-update's answer.
+// Updated is self-update's answer. Proxy is what the update did to the
+// running TLS proxy; absent when the release that ran the update predates
+// 0.6.1, which never restarts it.
 type Updated struct {
-	MsbctlVersion string `json:"msbctl_version"`
-	Updated       bool   `json:"updated"`
+	MsbctlVersion string        `json:"msbctl_version"`
+	Updated       bool          `json:"updated"`
+	Proxy         *ProxyRestart `json:"proxy,omitempty"`
+}
+
+// ProxyRestart is what msbctl did to the proxy (F25). Its "reason" is
+// msbctl's text and is not read.
+type ProxyRestart struct {
+	State   string `json:"state"` // current, not_running, restarted or failed
+	Version string `json:"version,omitempty"`
+}
+
+// Proxy restart states.
+const (
+	ProxyCurrent    = "current"
+	ProxyNotRunning = "not_running"
+	ProxyRestarted  = "restarted"
+	ProxyFailed     = "failed"
+)
+
+// RestartProxyVersion is the first msb-manager with `kandev restart-proxy`.
+const RestartProxyVersion = "0.6.1"
+
+// ProxyStale reports whether the host's TLS proxy runs another release than
+// its msbctl: an update it missed. A proxy older than 0.6.1 reports no
+// version at all.
+func (h Health) ProxyStale() bool {
+	return h.Serve.Mode == ServeProxy && h.Serve.Running && h.Serve.Version != h.MsbctlVersion
+}
+
+// RestartProxy runs `msbctl kandev restart-proxy` (0.6.1, F25): a restart
+// only if the proxy runs another release, so never a cut for nothing.
+// msbctl answers unavailable when the restart failed.
+func (c *Client) RestartProxy(ctx context.Context, h hosts.Host) (ProxyRestart, error) {
+	var out struct {
+		Proxy *ProxyRestart `json:"proxy"`
+	}
+	if err := c.call(ctx, h, []string{"restart-proxy"}, nil, &out); err != nil {
+		return ProxyRestart{}, err
+	}
+	if out.Proxy == nil {
+		return ProxyRestart{}, &Error{Code: CodeUnavailable}
+	}
+	out.Proxy.Version = reportedText(out.Proxy.Version)
+	return *out.Proxy, nil
 }
 
 // SelfUpdate runs `msbctl self-update --json --version V` through the
@@ -248,8 +293,8 @@ type Updated struct {
 // stderr, which is never read.
 func (c *Client) SelfUpdate(ctx context.Context, h hosts.Host, version string) (Updated, error) {
 	var out Updated
-	// As a tag: get.sh puts the version into the release URL unchanged, and
-	// releases are tagged v0.6.0. msbctl's own check takes either form.
+	// As a tag: before 0.6.1, get.sh put the version into the release URL
+	// unchanged, and releases are tagged v0.6.0. msbctl takes either form.
 	tag := "v" + strings.TrimPrefix(version, "v")
 	if err := c.generic(ctx, h, []string{"self-update", "--json", "--version", tag}, &out); err != nil {
 		return Updated{}, err
@@ -258,5 +303,8 @@ func (c *Client) SelfUpdate(ctx context.Context, h hosts.Host, version string) (
 		return Updated{}, &Error{Code: CodeUnavailable}
 	}
 	out.MsbctlVersion = reportedText(out.MsbctlVersion)
+	if out.Proxy != nil {
+		out.Proxy.Version = reportedText(out.Proxy.Version)
+	}
 	return out, nil
 }

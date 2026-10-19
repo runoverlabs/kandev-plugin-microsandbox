@@ -29,6 +29,7 @@ var upgradeTarget = msbctl.ManagerPin.Version
 const (
 	stepUpgradeCheck = "check"
 	stepUpgrade      = "upgrade"
+	stepProxy        = "proxy"
 )
 
 func (r *Runtime) actionUpgrade(ctx context.Context, body []byte) response {
@@ -52,6 +53,7 @@ func (r *Runtime) actionUpgrade(ctx context.Context, body []byte) response {
 	steps := []hostsetup.Step{
 		{Key: stepUpgradeCheck, Title: "Read the host's msbctl version", State: hostsetup.StateSkipped},
 		{Key: stepUpgrade, Title: "Update msb-manager to " + upgradeTarget, State: hostsetup.StateSkipped},
+		{Key: stepProxy, Title: "Run the TLS proxy on that release", State: hostsetup.StateSkipped},
 		{Key: stepTest, Title: "Run Test", State: hostsetup.StateSkipped},
 	}
 	id, res := r.startJob(h.Name, steps, upgradeTimeout, func(ctx context.Context, id string) {
@@ -82,9 +84,9 @@ func (r *Runtime) runUpgrade(ctx context.Context, id string, h hosts.Host) {
 	have := health.MsbctlVersion
 	switch {
 	case !msbctl.Older(have, upgradeTarget):
-		r.setJobStep(id, stepUpgradeCheck, hostsetup.StateOK, "msbctl "+have+" is not older than "+upgradeTarget+": nothing to update.")
+		r.setJobStep(id, stepUpgradeCheck, hostsetup.StateOK, "msbctl "+have+" is not older than "+upgradeTarget+".")
 		r.setJobStep(id, stepUpgrade, hostsetup.StateOK, "Already current.")
-		r.finishUpgrade(ctx, id, client, h, nil)
+		r.finishUpgrade(ctx, id, client, h, r.settleProxy(ctx, id, client, h, health))
 		return
 	case !health.CanSelfUpdate():
 		r.setJobStep(id, stepUpgradeCheck, hostsetup.StateManual,
@@ -105,13 +107,64 @@ func (r *Runtime) runUpgrade(ctx context.Context, id string, h hosts.Host) {
 		detail = "Updated msbctl from " + have + " to " + got.MsbctlVersion + "."
 	}
 	r.setJobStep(id, stepUpgrade, map[bool]string{true: hostsetup.StateChanged, false: hostsetup.StateOK}[got.Updated], detail)
-	var manual []string
-	if got.Updated {
-		// The proxy is a long-running service: it keeps the release it
-		// started with until restarted, which the plugin's key cannot do.
-		manual = append(manual, "The TLS proxy keeps running msbctl "+have+" until it restarts. On the host, when no session needs it: systemctl --user restart msb-kandev-proxy.service")
+	if got.Proxy != nil && (got.Proxy.State == msbctl.ProxyRestarted || got.Proxy.State == msbctl.ProxyCurrent || got.Proxy.State == msbctl.ProxyNotRunning) {
+		r.setJobStep(id, stepProxy, proxyState(got.Proxy.State), proxyDetail(*got.Proxy))
+		r.finishUpgrade(ctx, id, client, h, nil)
+		return
 	}
-	r.finishUpgrade(ctx, id, client, h, manual)
+	// The release that ran the update predates 0.6.1, which never restarts
+	// the proxy, or its restart failed: the new release finishes it.
+	after, err := client.Health(ctx, h)
+	if err != nil && after.MsbctlVersion == "" {
+		r.setJobStep(id, stepProxy, hostsetup.StateFailed, "The host did not answer health after the update; run Test for why.")
+		r.finishJob(id, jobFailed, nil)
+		return
+	}
+	r.finishUpgrade(ctx, id, client, h, r.settleProxy(ctx, id, client, h, after))
+}
+
+// settleProxy makes a proxy that missed an update run the host's msbctl
+// release, and returns what the operator still has to do, if anything.
+func (r *Runtime) settleProxy(ctx context.Context, id string, client *msbctl.Client, h hosts.Host, health msbctl.Health) []string {
+	switch {
+	case health.Serve.Mode != msbctl.ServeProxy || !health.Serve.Running:
+		r.setJobStep(id, stepProxy, hostsetup.StateOK, "No TLS proxy runs on this host.")
+		return nil
+	case !health.ProxyStale():
+		r.setJobStep(id, stepProxy, hostsetup.StateOK, "The proxy runs msbctl "+health.Serve.Version+".")
+		return nil
+	case msbctl.Older(health.MsbctlVersion, msbctl.RestartProxyVersion):
+		r.setJobStep(id, stepProxy, hostsetup.StateManual, "The proxy runs an older release than msbctl "+health.MsbctlVersion+".")
+		return []string{restartProxyByHand}
+	}
+	got, err := client.RestartProxy(ctx, h)
+	if err != nil {
+		log.Printf("%s %s: restart-proxy: %v", ActionHostsUpgrade, h.Name, err)
+		r.setJobStep(id, stepProxy, hostsetup.StateFailed, "msbctl could not restart the proxy onto the new release.")
+		return []string{restartProxyByHand}
+	}
+	r.setJobStep(id, stepProxy, proxyState(got.State), proxyDetail(got))
+	return nil
+}
+
+const restartProxyByHand = "On the host, when no session needs it: systemctl --user restart msb-kandev-proxy.service (or msbctl host kandev install, if its unit runs an old path)."
+
+func proxyState(state string) string {
+	if state == msbctl.ProxyRestarted {
+		return hostsetup.StateChanged
+	}
+	return hostsetup.StateOK
+}
+
+func proxyDetail(p msbctl.ProxyRestart) string {
+	switch p.State {
+	case msbctl.ProxyRestarted:
+		return "Restarted the proxy onto msbctl " + p.Version + "; Kandev reconnects its sessions."
+	case msbctl.ProxyNotRunning:
+		return "No TLS proxy runs on this host."
+	default:
+		return "The proxy already runs msbctl " + p.Version + "."
+	}
 }
 
 func (r *Runtime) finishUpgrade(ctx context.Context, id string, client *msbctl.Client, h hosts.Host, manual []string) {

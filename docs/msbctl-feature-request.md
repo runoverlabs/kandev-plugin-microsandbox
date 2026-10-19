@@ -1122,19 +1122,32 @@ plugin key's forced command, `self-update --json --version v0.6.0` answered
 `updated: false`, `--version v0.4.0` and `configure` were refused; Kandev's
 host list showed `health.host`.
 
-### Follow-ups from 0.6.0
+### F25: the proxy follows an update
 
-- **F25: restart the proxy after an update.** `self-update` switches
-  `current` but leaves `msb-kandev-proxy.service` running the old release
-  until someone restarts it on the host, which the plugin's key cannot do.
-  A `systemctl --user try-restart msb-kandev-proxy.service` after a
-  successful install (the reaper timer already starts fresh each minute)
-  would finish the update; it drops live data-path connections, which
-  Kandev re-establishes, so the plugin would rather call it when the host
-  has no sessions, if it were a separate verb (`kandev restart-proxy`).
-- **`get.sh --version 0.6.0`** puts the version into the release URL as
-  given, and releases are tagged `v0.6.0`, so the bare form 404s. The plugin
-  sends `v0.6.0`; accepting both in get.sh would remove the trap.
+Asked after 0.6.0: `self-update` switched `current` but left
+`msb-kandev-proxy.service` on the old release, and the plugin's key could not
+restart it.
+
+**Built** and released in msb-manager
+[0.6.1](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.6.1)
+(`eefd871`), checked against its source:
+
+- The proxy writes its release into the lock it holds; `health.serve.version`
+  reports it (absent for a proxy older than 0.6.1).
+- `self-update` restarts the proxy (`systemctl --user try-restart`) when it
+  runs another release than the one just installed, and `--json` adds
+  `"proxy": {"state": "current" | "not_running" | "restarted" | "failed",
+  "version"}`. The release that runs the update does this, so an update
+  from 0.6.0 restarts nothing.
+- `kandev restart-proxy` finishes that: a restart only when the proxy runs
+  another release than msbctl, `{"proxy": {...}}`, `unavailable` if the
+  restart failed. Allowed for the plugin's key.
+- `get.sh --version 0.6.1` now means `v0.6.1`.
+
+Verified through Kandev on alloy (2026-10-19): `hosts.upgrade` took it from
+0.6.0 to 0.6.1 (the 0.6.0 updater left the proxy on 0.6.0, the plugin saw
+the stale `serve.version` and ran `restart-proxy`), then Test passed with
+the proxy on 0.6.1.
 
 ## Open questions
 

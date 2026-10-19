@@ -31,7 +31,7 @@ export interface Health {
     max_memory_mib?: number;
     memory_mib?: number;
   };
-  serve?: { ok?: boolean; mode?: string; listen?: string; running?: boolean };
+  serve?: { ok?: boolean; mode?: string; listen?: string; running?: boolean; version?: string };
   tls?: { installed?: boolean; subject?: string; not_after?: string };
   egress?: { allow_extra?: string[] };
   host?: HostFacts;
@@ -214,7 +214,8 @@ export function hostDetail(h: HostView): Array<[string, string]> {
   if (health.serve) {
     push(
       "Data path",
-      `${health.serve.mode ?? "?"}${health.serve.listen ? ` on ${health.serve.listen}` : ""}, ${health.serve.ok ? "up" : "down"}`,
+      `${health.serve.mode ?? "?"}${health.serve.listen ? ` on ${health.serve.listen}` : ""}, ${health.serve.ok ? "up" : "down"}` +
+        (proxyStale(h) ? `, proxy on ${health.serve.version || "an older release"}` : ""),
     );
   }
   if (health.tls?.installed) push("Certificate", `${health.tls.subject ?? ""}, until ${health.tls.not_after ?? "?"}`);
@@ -263,4 +264,11 @@ export function olderVersion(have: string, want: string): boolean {
     if (h[i] !== w[i]) return (h[i] ?? 0) < (w[i] ?? 0);
   }
   return false;
+}
+
+/** Whether the host's TLS proxy runs another release than its msbctl: an update it missed. */
+export function proxyStale(h: HostView): boolean {
+  const health = h.status?.health;
+  if (!health?.serve || health.serve.mode !== "proxy" || !health.serve.running) return false;
+  return (health.serve.version ?? "") !== (health.msbctl_version ?? "");
 }

@@ -7,6 +7,7 @@ import {
   hostDetail,
   olderVersion,
   parseDestination,
+  proxyStale,
   splitList,
   stepTone,
   type HostList,
@@ -53,7 +54,7 @@ export function createHostsPage(host: PluginHostApi): Component {
       if (job) setUpgrade(job);
     };
     const version = h.status?.health?.msbctl_version;
-    const behind = version !== undefined && olderVersion(version, props.release);
+    const behind = (version !== undefined && olderVersion(version, props.release)) || proxyStale(h);
     const shown = test ?? h.status ?? null;
     return k.h(
       "div",
@@ -72,7 +73,7 @@ export function createHostsPage(host: PluginHostApi): Component {
           { className: "msb-host__actions" },
           k.button(m.busy === "test" ? "Testing..." : "Test", () => void runTest(), { disabled: m.busy !== null, testId: `test-${h.name}` }),
           behind
-            ? k.button(`Update to ${props.release}`, () => void startUpgrade(), { disabled: m.busy !== null || upgrade?.state === "running", testId: `upgrade-${h.name}` })
+            ? k.button(version !== undefined && olderVersion(version, props.release) ? `Update to ${props.release}` : "Restart proxy onto the new release", () => void startUpgrade(), { disabled: m.busy !== null || upgrade?.state === "running", testId: `upgrade-${h.name}` })
             : null,
           k.button(h.draining ? "Undrain" : "Drain", () => void drain(), { disabled: m.busy !== null }),
           k.button("Remove", () => void remove(), { variant: "ghost", disabled: m.busy !== null }),

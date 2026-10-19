@@ -123,16 +123,27 @@ list.
 ### `msbctl self-update --json --version vX.Y.Z`
 
 msb-manager 0.6.0 (F24). Installs that release through the host's own
-`get.sh` and answers `{"msbctl_version": "0.6.0", "updated": true}`, the
-version now installed. The plugin sends the tag form (`v0.6.0`): `get.sh`
-builds the release URL from it unchanged. An older release is refused by
-`host serve` (exit 126); a git checkout answers `unsupported`; a host with
-Kandev off answers `denied`. The installer's output goes to stderr, which is
-not read. The running TLS proxy keeps the old release until it is restarted
-on the host.
+`get.sh` and answers `{"msbctl_version": "0.6.1", "updated": true}`, the
+version now installed, plus from 0.6.1 `"proxy": {"state", "version"}`: what
+the update did to the running TLS proxy (`current`, `not_running`,
+`restarted` or `failed`). The plugin sends the tag form (`v0.6.1`), which
+0.6.0's `get.sh` needs. An older release is refused by `host serve` (exit
+126); a git checkout answers `unsupported`; a host with Kandev off answers
+`denied`. The installer's output goes to stderr, which is not read.
 
 Used by: `hosts.upgrade`, only for hosts whose `msbctl_version` is 0.6.0 or
 newer and older than the release the plugin installs.
+
+### `msbctl kandev restart-proxy`
+
+msb-manager 0.6.1 (F25). Restarts the TLS proxy only when it runs another
+release than msbctl, and answers `{"proxy": {"state", "version"}}`;
+`unavailable` when the restart failed. `health.serve.version` is the running
+proxy's release (absent before 0.6.1): one that differs from
+`msbctl_version` missed a restart, which an update run by 0.6.0 always does.
+
+Used by: `hosts.upgrade`, after an update that did not restart the proxy,
+or on a current host whose proxy is stale. Test warns about a stale proxy.
 
 ### `msbctl ls --json`
 

@@ -448,6 +448,11 @@ func (r *Runtime) checkHost(ctx context.Context, client *msbctl.Client, h hosts.
 	if err == nil && health.Egress != nil {
 		r.diagnoseEgress(ctx, &result, health.Egress.AllowExtra)
 	}
+	// A proxy on an older release than msbctl missed a restart after an
+	// update: it still serves, with the old code.
+	if err == nil && health.ProxyStale() && result.Warning == "" {
+		result.Warning = "The TLS proxy runs an older release than msbctl " + health.MsbctlVersion + ". Update the host to restart it onto the new one."
+	}
 	result.outcome = outcome
 	return result
 }
