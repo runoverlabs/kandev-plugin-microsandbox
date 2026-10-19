@@ -66,33 +66,3 @@ func (r *Runtime) ValidateExecutorProfile(ctx context.Context, req *pluginsdk.Va
 func fieldError(p profile.FieldError) *pluginsdk.ExecutorProviderFieldError {
 	return &pluginsdk.ExecutorProviderFieldError{Field: p.Field, Code: p.Code, MessageId: p.MessageID()}
 }
-
-// The six RPCs below complete the contract Kandev requires before it offers
-// the provider at all. Provisioning is not built yet, so this release never
-// allocates a sandbox, and each answer is the truthful one for a provider
-// that owns no resources: recovery finds nothing, there is nothing to
-// attach, inspect or connect to, and every destroy is already done.
-
-func (r *Runtime) ProvisionExecutorEnvironment(context.Context, *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
-	return &pluginsdk.ProvisionExecutorEnvironmentResponse{Error: providerError(msbctl.CodeUnsupported, "provisionUnavailable")}, nil
-}
-
-func (r *Runtime) RecoverExecutorOperation(context.Context, *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
-	return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "absent"}, nil
-}
-
-func (r *Runtime) AttachExecutorEnvironment(context.Context, *pluginsdk.AttachExecutorEnvironmentRequest) (*pluginsdk.AttachExecutorEnvironmentResponse, error) {
-	return &pluginsdk.AttachExecutorEnvironmentResponse{Error: providerError(msbctl.CodeNotFound, "notFound")}, nil
-}
-
-func (r *Runtime) InspectExecutorEnvironment(context.Context, *pluginsdk.InspectExecutorEnvironmentRequest) (*pluginsdk.InspectExecutorEnvironmentResponse, error) {
-	return &pluginsdk.InspectExecutorEnvironmentResponse{State: "absent", Reason: msbctl.CodeNotFound}, nil
-}
-
-func (r *Runtime) ResolveExecutorConnection(context.Context, *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
-	return &pluginsdk.ResolveExecutorConnectionResponse{Error: providerError(msbctl.CodeNotFound, "notFound")}, nil
-}
-
-func (r *Runtime) DestroyExecutorEnvironment(context.Context, *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
-	return &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true}, nil
-}

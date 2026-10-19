@@ -21,6 +21,25 @@ First development snapshot: the provider skeleton and the host registry
 - Placement: healthy candidates with room, most free memory first.
 - `health` also reports the host's `platform` and `base_url`; `hosts.test`
   warns when that `base_url` differs from the registered one.
+- The provider lifecycle, against msbctl's `kandev` verbs:
+  - **Provision** places the sandbox, reusing the host that already holds the
+    operation so a retry never creates a second one. It creates the
+    sandbox, checkpoints it with Kandev before anything else can fail,
+    verifies the agentctl binary from Kandev, and starts it with the nonce.
+    Secrets, registry credentials, the nonce and the binary go to the host
+    on stdin only.
+  - **Recover** reports found, absent, or unknown while any host cannot
+    answer.
+  - **Attach** returns the same sandbox, restarting a stopped one that binds
+    no secrets.
+  - **Inspect** maps host states onto Kandev's; an unreachable host is
+    `unknown`, never `absent`.
+  - **Resolve connection** leases the control port and instance ports
+    41001–41003, refusing a lease header Kandev would reject.
+  - **Destroy** confirms absence, finds the sandbox by operation id when
+    there is no resource state, and stays retryable while a host is down.
+  - Placement heals a proxy host's certificate before counting it.
+- Resource state gains `env`, the Kandev environment id.
 - A root certificate for sandbox hosts: `ca.create` generates one,
   name-constrained to the hosts' domain, and `ca.get` shows it with install
   steps for the Kandev server. Host certificates are issued at `hosts.add`

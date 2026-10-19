@@ -599,6 +599,7 @@ The biggest risks are the `tailscale serve` data path (is no daemon actually eno
 - [x] ~~Tailnet ACL alone, or a per-lease bearer too?~~ Both: the proxy checks a bearer token per connection.
 - [x] ~~Does Kandev re-resolve a lease on a 401?~~ No (v0.97.0): only 30 s before `expires_at`. Hence tokens that normal operation never invalidates (msbctl request F18).
 - [ ] Does an agentctl restarted after a VM restart need a new nonce from kandev, and does attach provide one? Compare with the SSH executor.
+- [ ] **Attach cannot re-send secrets** (found Oct 19): `AttachExecutorEnvironmentRequest` carries the resource and `expected_runtime_identity` but no profile snapshot, so there are no secret values to give `kandev start`. As built, attach restarts a stopped sandbox only if it binds no extra secrets, and answers `unsupported` otherwise. This only arises after a host reboot, since the plugin never stops a VM itself. Options: ask Kandev to pass the profile to attach, or keep VMs running across reboots (which needs the secrets stored on the host, rejected so far).
 - [x] ~~Does an instance port range of 8 suffice?~~ Resolved: kandev only leases 8765 and the instance port; previews and the editor go through agentctl's proxy. A range of 3 (41001–41003) leaves spares. Re-check at the pinned commit.
 - [ ] Is any agentctl startup configuration beyond nonce, listen host and port required (`InternalAgentctlStartupConfigEnv` in the launcher)?
 - [ ] Do workflow steps or subtasks that expect a shared parent workspace fail on plugin executors? Test with real workflows before rollout.
@@ -613,6 +614,8 @@ The biggest risks are the `tailscale serve` data path (is no daemon actually eno
 * Risk: msb releases change behaviour between patch versions. `msbctl remote setup` installs the laptop's msb version on each host; keep every kandev host on the same version and re-run the Phase 0 spikes on each msb upgrade.
 
 ## Base image
+
+Kandev creates the session's agentctl instance with its workspace at **`/workspace`** (`pluginExecutorWorkspacePath`, `lifecycle/executor_plugin.go`), so the image must let the agent user create and write `/workspace`.
 
 The image is complete: kandev VMs run no msbctl bootstrap. It holds git, gh, the agent CLIs a project uses, the language toolchains, `socat` (for the port fallback), and a non-root user. Pin it by digest. msb boots a host directory given as the image, so only OCI references are accepted **[exists: `image_problem()`]**. The msb-manager bootstrap (`bootstrap.sh`) is a usable reference for what to install and from where, since it is written to work under deny-by-default egress (apt over HTTPS, pinned release downloads with checksums).
 

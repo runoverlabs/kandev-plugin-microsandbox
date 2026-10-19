@@ -173,16 +173,20 @@ executor_providers:
         extra_secret_3_hosts:
           type: string
           title: "Secret 3: hosts"
-    # Only what routes later calls: the host that owns the sandbox and its
-    # name there. Never a secret, a nonce or a lease.
+    # Only what routes later calls: the host that owns the sandbox, its
+    # name there and the environment id. Never a secret, a nonce or a lease.
     resource_state_schema:
       type: object
       additionalProperties: false
-      required: [host, sandbox_name]
+      required: [host, sandbox_name, env]
       properties:
         host:
           type: string
         sandbox_name:
+          type: string
+        # The Kandev environment id: how every msbctl kandev verb addresses
+        # the sandbox on its host.
+        env:
           type: string
         image:
           type: string

@@ -11,9 +11,10 @@ reach. Each host is an ordinary [msb-manager](https://github.com/runoverlabs/san
 install, driven over SSH through a restricted forced command
 (`msbctl host serve --kandev`). No daemon, port or token scheme of its own.
 
-> **Status: early development.** The host registry, profile validation and
-> placement work. Provisioning is not built yet, so a profile can be saved
-> but a task cannot launch on it. See the [implementation plan](docs/plans/implementation-plan.md)
+> **Status: early development.** The host registry, profile validation,
+> placement, the provider's whole lifecycle (provision, connect, inspect,
+> recover, attach, destroy) and the root certificate are built and tested
+> against fakes, but not yet against a real host or Kandev. See the [implementation plan](docs/plans/implementation-plan.md)
 > for the phases, the [host protocol](docs/host-protocol.md) for what a
 > sandbox host must answer, and the [msbctl feature request](docs/msbctl-feature-request.md)
 > for what msb-manager still has to build.

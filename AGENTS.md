@@ -113,6 +113,15 @@ Verified in `../kandev` at v0.97.0.
   of failures, which is why tokens and certificates are designed to heal
   rather than to be strict.
 
+- **Provider callbacks are narrow.** Progress stages: `provision`,
+  `artifact`, `bootstrap`, `readiness`, with `0 < total ≤ 1000`. Checkpoint
+  phases: `provisioned`, `bootstrapping`, `artifact_staging`. Platforms are
+  `<goos>-<goarch>` (`linux-amd64`). The agentctl artifact comes in 256 KiB
+  chunks, each carrying the whole artifact's sha256.
+- **Attach carries no profile**, so no secret values: a stopped sandbox that
+  binds secrets cannot be restarted from attach.
+- Kandev puts the session workspace at `/workspace` in the guest.
+
 ## Background work
 
 `Runtime.SetHost` starts one maintainer goroutine (`maintainer.go`); `Close`

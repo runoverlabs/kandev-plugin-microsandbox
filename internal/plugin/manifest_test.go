@@ -112,5 +112,6 @@ func TestManifestProviderMatchesTheCode(t *testing.T) {
 	for name := range p.StateSchema.Properties {
 		state = append(state, name)
 	}
-	assert.ElementsMatch(t, []string{"host", "sandbox_name", "image", "created_at"}, state)
+	// env joined so later calls can address the sandbox by environment id.
+	assert.ElementsMatch(t, []string{"host", "sandbox_name", "env", "image", "created_at"}, state)
 }

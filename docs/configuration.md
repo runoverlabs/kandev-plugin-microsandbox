@@ -134,6 +134,11 @@ nothing extra, and `["*"]` trusts every profile. The plugin cannot see that
 setting when the profile is saved, so an entry the host does not allow fails
 at launch with `invalid_config`.
 
+**The image** must be complete: no bootstrap runs in a Kandev sandbox. It
+needs git, the agent CLIs the project uses, its toolchains, and a writable
+**`/workspace`**, where Kandev puts the session's checkout. Kandev installs
+agentctl itself at launch.
+
 Egress is hostname-based and inspected on :443. On any other port a hostname
 rule degrades to the IPs it resolves to, and plain HTTP (:80) is always
 denied. Profile entries are added to the host's own base rules

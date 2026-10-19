@@ -98,35 +98,3 @@ func TestValidateWithUnreadableRegistryIsUnavailable(t *testing.T) {
 	assert.Equal(t, "unavailable", res.Error.Code)
 	assert.NotContains(t, res.String(), "db locked")
 }
-
-// Until provisioning exists the plugin owns no resources, and the other RPCs
-// say so rather than erroring.
-func TestSkeletonRPCsDescribeAProviderWithNoResources(t *testing.T) {
-	r := newRuntime(t, newFakeHost())
-	ctx := context.Background()
-
-	provision, err := r.ProvisionExecutorEnvironment(ctx, &pluginsdk.ProvisionExecutorEnvironmentRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, "unsupported", provision.Error.Code)
-	assert.Nil(t, provision.Resource)
-
-	recover, err := r.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, "absent", recover.Outcome)
-
-	attach, err := r.AttachExecutorEnvironment(ctx, &pluginsdk.AttachExecutorEnvironmentRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, "not_found", attach.Error.Code)
-
-	inspect, err := r.InspectExecutorEnvironment(ctx, &pluginsdk.InspectExecutorEnvironmentRequest{})
-	require.NoError(t, err)
-	assert.Equal(t, "absent", inspect.State)
-
-	lease, err := r.ResolveExecutorConnection(ctx, &pluginsdk.ResolveExecutorConnectionRequest{})
-	require.NoError(t, err)
-	assert.Nil(t, lease.Lease)
-
-	destroy, err := r.DestroyExecutorEnvironment(ctx, &pluginsdk.DestroyExecutorEnvironmentRequest{})
-	require.NoError(t, err)
-	assert.True(t, destroy.ConfirmedAbsent)
-}

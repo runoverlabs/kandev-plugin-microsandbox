@@ -116,6 +116,18 @@ sandboxes are never listed. `state` is `creating`, `running`, `stopped` or
 Used by: **Remove** on the Sandbox Hosts page, which refuses while a host
 still lists sandboxes.
 
+## Session verbs
+
+`provision`, `agentctl`, `inspect`, `find`, `start`, `lease` and `destroy`
+are built on msb-manager `main` and called by the plugin as described in the
+[msbctl feature request](msbctl-feature-request.md) (F7–F12). They are
+implemented in `internal/msbctl/sandbox.go`. Secret values, registry
+credentials, the bootstrap nonce and the agentctl binary go on stdin: one
+JSON header line, then for `agentctl` exactly `size` bytes. The plugin
+refuses a `lease` whose `headers` include a name Kandev refuses in a lease
+(`Authorization`, `X-Instance-ID`, `Host`, `Cookie`, `Set-Cookie`,
+`Sec-WebSocket-Protocol`, hop-by-hop, `Proxy-*`), answering `unavailable`.
+
 ## Verbs the plugin calls ahead of the host
 
 The plugin already calls these, but msbctl has not built them yet (feature
@@ -143,8 +155,5 @@ is sent once, on stdin, and is never in argv or any output.
 
 ## Verbs still to define
 
-`provision`, `agentctl`, `inspect`, `find`, `start`, `stop`, `expiry`,
-`lease`, `destroy` and `reap` are built on the host as
-described in the [msbctl feature request](msbctl-feature-request.md). Each
-moves here, with its tests in `internal/msbctl`, when the plugin starts
-calling it.
+`stop`, `expiry` and `reap` are built on the host but not called by the
+plugin yet.
