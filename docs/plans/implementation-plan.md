@@ -638,7 +638,7 @@ Read these before writing host-side code. AGENTS.md in the repo describes each i
 
 Read these at the pinned commits before writing code.
 
-**msb-manager** ([repo](https://github.com/runoverlabs/sandbox-manager), `main`)
+**msb-manager** ([repo](https://github.com/runoverlabs/sandbox-manager), `main`; the kandev host side ships in v0.4.0)
 
 - `AGENTS.md`: architecture, constraints, and every mechanism listed above
 - `msbctl`: `Sandbox` (flag emission), `do_create()`, `secret_env()`, `host_serve()` / `restricted_problem()`, `cmd_host()`, `ls_data()` / `show_data()`, `ensure_*` boot steps

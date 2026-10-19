@@ -2,14 +2,14 @@
 
 **For:** [msb-manager](https://github.com/runoverlabs/sandbox-manager) (`msbctl`)
 **From:** [kandev-plugin-microsandbox](../README.md), the Kandev remote executor plugin
-**Status:** built and merged into msb-manager `main`
+**Status:** built, and **released in msb-manager
+[0.4.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.4.0)**
 ([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61), merge
-`66f03f7`, 2026-10-17). **Not released yet:** the latest release is
-v0.3.0, which has none of this. This document now describes what was built;
+`66f03f7`, 2026-10-17). This document now describes what was built;
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and merged into msb-manager `main` (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19), not released yet. It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
+**Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
 
@@ -39,19 +39,18 @@ As of 2026-10-17:
 
 | | State |
 | --- | --- |
-| F1–F15 | Built, on msb-manager `main`, in no release yet. Until one is cut, a host gets it from a checkout (`install.sh --dev`) or `main`. |
+| F1–F15 | Built, released in 0.4.0. |
 | Tests | `tests/test_kandev.py` (28) and `host serve --kandev` rows in `tests/test_host_serve.py`, against the fake `msb` and a fake `tailscale`. CI green. |
 | Live run | The whole lifecycle against real msb 0.7.7, nested in an msb sandbox: provision, agentctl, inspect, lease, stop/start with re-sent secrets, expiry, reap, destroy. No secret, password or nonce reached argv or disk. |
 | Spikes | `spikes/16-kandev-host.sh`: S1, S3, S4 (pinned address) and the registry check PASS nested. **S2 (`tailscale serve`) and S5 (round trips) not run yet**: they need a tailnet node and a remote (`SPIKE_TS=1`, `SPIKE_SSH_DEST`). S4 should be re-run on a real host. |
 | Docs | "Kandev hosts" page and a `msbctl kandev` section on the Commands page. |
-| F16–F19 | Built and merged into `main`. `tests/test_kandev_tls.py` runs real TLS on loopback against certificates `openssl` makes at test time (a name-constrained root and its leaves). An end-to-end run of the CLI, with `curl` as the client, gave 200 with a lease, 401 without one, and connection refused after `destroy`. Not yet run against real msb or from another machine; the 10-minute WebSocket idle check hasn't been run either. |
+| F16–F19 | Built, released in 0.4.0. `tests/test_kandev_tls.py` runs real TLS on loopback against certificates `openssl` makes at test time (a name-constrained root and its leaves). An end-to-end run of the CLI, with `curl` as the client, gave 200 with a lease, 401 without one, and connection refused after `destroy`. Not yet run against real msb or from another machine; the 10-minute WebSocket idle check hasn't been run either. |
 
 For the plugin:
 
 - **Gate on `health.protocol == 1`, not on `msbctl_version`.** The version
-  string is `0.3.0` on a release install, but a checkout reports
-  `0.3.0+<sha> (git checkout)` — and every host with these verbs today is
-  a checkout or `main`, still numbered 0.3.0.
+  string is `0.4.0` on a release install, but a checkout reports
+  `<version>+<sha> (git checkout)`.
 - **The data path is the one open risk.** If S2 shows `tailscale serve`
   does not strip the `/vm/<name>/p/<port>` prefix or does not pass
   WebSocket upgrades, F10 switches to the fallback in the plan (a TLS
@@ -184,7 +183,7 @@ Each milestone is independently useful and unblocks a plugin phase.
 | **M2: one session runs** | [F6](#f6-the-kandev-entry-kind) entry kind · [F7](#f7-kandev-provision) `provision` · [F8](#f8-kandev-agentctl) `agentctl` · [F9](#f9-kandev-inspect-and-kandev-find) `inspect` · [F10](#f10-kandev-lease-and-the-data-path) `lease` + serve mappings · [F11](#f11-kandev-destroy) `destroy` | A Kandev task launches, shows terminal, files, git and editor, and is cleaned up on archive |
 | **M3: it survives failure** | [F9](#f9-kandev-inspect-and-kandev-find) `find` · [F12](#f12-kandev-start-and-kandev-stop) `start`/`stop` · [F13](#f13-kandev-expiry) `expiry` · [F14](#f14-kandev-reap-and-host-kandev-install) `reap` + timer | Lost replies, Kandev restarts, host reboots, expiry |
 | **M4: docs** | [F15](#f15-documentation) "Kandev hosts" page | A new host in under 30 minutes from the docs |
-| **M5: host-side TLS** (request 2), merged into `main` | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
+| **M5: host-side TLS** (request 2), released in 0.4.0 | [F16](#f16-serve--proxy-the-tls-proxy) proxy · [F17](#f17-kandev-tls-install) `tls install` · [F18](#f18-lease-tokens) lease tokens · [F19](#f19-health-reports-tls) `health.tls` | The default data path: works without Tailscale's hosted control plane (headscale, WireGuard, a LAN), with the plugin's own root |
 
 ## Constraints this must respect
 
@@ -778,7 +777,7 @@ terminates **on the sandbox host**, so traffic goes Kandev → host directly.
 What msbctl needs is below. The plugin owns the CA, key generation and
 renewal; msbctl stores the certificate and serves it.
 
-**Built** and merged into msb-manager `main`; the differences are in
+**Built** and released in msb-manager 0.4.0; the differences are in
 [Changes from request 2](#changes-from-request-2) and
 [Plugin review of request 2](#plugin-review-of-request-2-2026-10-19-two-blockers-both-fixed).
 F16 and F18 below are the shape as built after the lease-token fix.

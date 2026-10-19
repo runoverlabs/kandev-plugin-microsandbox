@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-First development snapshot: the provider skeleton and the host registry
-(Phase 3 of the implementation plan). Not yet able to launch a task.
+First development snapshot: the host registry, the provider's lifecycle and
+the root certificate, tested against fakes but not yet against a real host
+or Kandev. Sandbox hosts need msb-manager 0.4.0 or newer.
 
 - Executor provider `microsandbox` with the full profile schema. Profiles are
   validated on save: digest-pinned image, resource bounds, egress entries,

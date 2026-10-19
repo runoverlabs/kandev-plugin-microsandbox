@@ -8,12 +8,13 @@ plugin implements it today; what msbctl needs to build is in the
 
 **Protocol version: 1.** `health` reports it, and the plugin refuses a host
 reporting any other version rather than guessing. It never gates on
-`msbctl_version`: a checkout reports `0.3.0+<sha> (git checkout)`, and the
-first hosts with these verbs run msb-manager `main` ahead of a release.
+`msbctl_version`: a checkout reports `<version>+<sha> (git checkout)`.
 
-The host side is built on msb-manager `main`
-([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61)), not yet
-in a release.
+The host side ships in msb-manager
+[0.4.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.4.0),
+the first release with `msbctl kandev`
+([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61) and
+[PR #62](https://github.com/runoverlabs/sandbox-manager/pull/62)).
 
 ## Transport
 
@@ -66,7 +67,7 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 ```json
 {
   "protocol": 1,
-  "msbctl_version": "0.3.0+66f03f7 (git checkout)",
+  "msbctl_version": "0.4.0",
   "msb_version": "0.7.7",
   "kvm": true,
   "enabled": true,
@@ -106,7 +107,7 @@ Inventory goes through msbctl's generic verbs, which under the plugin's key
 see Kandev's sandboxes only ([change notice](msbctl-kandev-verb-changes.md)):
 
 ```json
-{"msbctl": "0.3.0 (git checkout)", "sandboxes": [
+{"msbctl": "0.4.0", "sandboxes": [
   {"name": "k-6f1c2b9e", "source": "kandev", "state": "running",
    "kandev": {"env": "6f1c2b9e", "name": "k-6f1c2b9e", "operation_id": "op-1",
               "state": "running", "created_at": "…", "expires_at": "…", "…": "the rest of the record"}}
@@ -146,8 +147,7 @@ refuses a `lease` whose `headers` include a name Kandev refuses in a lease
 
 ## TLS proxy hosts
 
-For `serve = "proxy"` (feature request F16–F19, merged into msb-manager
-`main`), `health` reports the proxy and its certificate, and the plugin keeps
+For `serve = "proxy"` (feature request F16–F19, in msb-manager 0.4.0), `health` reports the proxy and its certificate, and the plugin keeps
 the certificate current with `tls install`.
 
 ### `health` fields for `serve = "proxy"`

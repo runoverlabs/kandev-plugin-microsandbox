@@ -17,7 +17,7 @@ install, driven over SSH through a restricted forced command
 > against fakes, but not yet against a real host or Kandev. See the [implementation plan](docs/plans/implementation-plan.md)
 > for the phases, the [host protocol](docs/host-protocol.md) for what a
 > sandbox host must answer, and the [msbctl feature request](docs/msbctl-feature-request.md)
-> for what msb-manager still has to build.
+> for how the host side was built.
 
 ## What it adds
 
@@ -31,14 +31,15 @@ install, driven over SSH through a restricted forced command
 
 - Kandev **0.97.0** or newer: the first release where remote executor plugins
   are on by default.
-- Sandbox hosts: Linux with KVM, set up as msb-manager remotes, with msbctl
-  speaking [host protocol](docs/host-protocol.md) version 1.
+- Sandbox hosts: Linux with KVM, set up as msb-manager remotes, with
+  msb-manager **0.4.0** or newer (msbctl speaking
+  [host protocol](docs/host-protocol.md) version 1).
 - A private network between Kandev and the hosts: Tailscale, headscale,
-  WireGuard or a LAN. Kandev reaches each sandbox over HTTPS, and the planned
-  default is a TLS proxy on each host with a certificate from the plugin's own
-  root, which you trust on the Kandev server once. That is not built yet:
-  see the [implementation plan](docs/plans/implementation-plan.md),
-  "Decision, Oct 19".
+  WireGuard or a LAN. Kandev reaches each sandbox over HTTPS: by default
+  through a TLS proxy on each host (`[kandev] serve = "proxy"`) with a
+  certificate from the plugin's own root, which you trust on the Kandev
+  server once; or through `tailscale serve`. See the
+  [implementation plan](docs/plans/implementation-plan.md), "Decision, Oct 19".
 
 ## Install
 
