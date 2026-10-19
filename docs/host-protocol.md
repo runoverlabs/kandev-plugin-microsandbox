@@ -10,11 +10,13 @@ plugin implements it today; what msbctl needs to build is in the
 reporting any other version rather than guessing. It never gates on
 `msbctl_version`: a checkout reports `<version>+<sha> (git checkout)`.
 
-The host side ships in msb-manager
-[0.4.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.4.0),
-the first release with `msbctl kandev`
+The plugin needs msb-manager
+[0.5.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.5.0)
+or newer. `msbctl kandev` first shipped in 0.4.0
 ([PR #61](https://github.com/runoverlabs/sandbox-manager/pull/61) and
-[PR #62](https://github.com/runoverlabs/sandbox-manager/pull/62)).
+[PR #62](https://github.com/runoverlabs/sandbox-manager/pull/62)); 0.5.0 adds
+the workspace disk
+([PR #65](https://github.com/runoverlabs/sandbox-manager/pull/65)).
 
 ## Transport
 
@@ -67,7 +69,7 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
 ```json
 {
   "protocol": 1,
-  "msbctl_version": "0.4.0",
+  "msbctl_version": "0.5.0",
   "msb_version": "0.7.7",
   "kvm": true,
   "enabled": true,
@@ -113,7 +115,7 @@ Inventory goes through msbctl's generic verbs, which under the plugin's key
 see Kandev's sandboxes only ([change notice](msbctl-kandev-verb-changes.md)):
 
 ```json
-{"msbctl": "0.4.0", "sandboxes": [
+{"msbctl": "0.5.0", "sandboxes": [
   {"name": "k-6f1c2b9e", "source": "kandev", "state": "running",
    "kandev": {"env": "6f1c2b9e", "name": "k-6f1c2b9e", "operation_id": "op-1",
               "state": "running", "created_at": "…", "expires_at": "…", "…": "the rest of the record"}}

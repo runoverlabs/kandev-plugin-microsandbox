@@ -4,7 +4,7 @@
 
 First development snapshot: the host registry, the provider's lifecycle and
 the root certificate. A whole agent session has run against Kandev 0.97.0
-and a real host. Sandbox hosts need msb-manager 0.4.0 or newer.
+and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
 
 - Executor provider `microsandbox` with the full profile schema. Profiles are
   validated on save: digest-pinned image, resource bounds, egress entries,

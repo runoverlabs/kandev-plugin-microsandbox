@@ -114,8 +114,9 @@ Found on the first real run (Kandev 0.97.0, msb-manager 0.4.0):
   a host with a firewall (firewalld on Fedora allows only `ssh`), open that
   range to the Kandev server's address only.
 - **Hosts need a workspace disk** (feature request F20): Kandev starts every
-  agent in `/workspace`, and nothing else creates it. msb-manager 0.4.0 does
-  not have it, so Test reports `outdated` there and placement skips it.
+  agent in `/workspace`, and nothing else creates it. msb-manager 0.5.0 gives
+  each sandbox its own disk there; 0.4.0 does not, so Test reports
+  `outdated` there and placement skips it.
 - **Terminal-passthrough agents and the task's shell terminal do not run in
   the sandbox** in Kandev 0.97.0: Kandev starts them on the Kandev server
   instead. Use agents that speak ACP.

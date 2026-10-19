@@ -14,7 +14,7 @@ install, driven over SSH through a restricted forced command
 > **Status: early development.** The host registry, profile validation,
 > placement, the provider's whole lifecycle (provision, connect, inspect,
 > recover, attach, destroy) and the root certificate are built. A whole agent
-> session has run against Kandev 0.97.0 and a real msb-manager 0.4.0 host;
+> session has run against Kandev 0.97.0 and a real msb-manager 0.5.0 host;
 > the known gaps, mostly on Kandev's side, are listed in
 > [configuration](docs/configuration.md#what-kandev-and-the-network-need). See the [implementation plan](docs/plans/implementation-plan.md)
 > for the phases, the [host protocol](docs/host-protocol.md) for what a
@@ -34,7 +34,7 @@ install, driven over SSH through a restricted forced command
 - Kandev **0.97.0** or newer: the first release where remote executor plugins
   are on by default.
 - Sandbox hosts: Linux with KVM, set up as msb-manager remotes, with
-  msb-manager **0.4.0** or newer (msbctl speaking
+  msb-manager **0.5.0** or newer (msbctl speaking
   [host protocol](docs/host-protocol.md) version 1).
 - A private network between Kandev and the hosts: Tailscale, headscale,
   WireGuard or a LAN. Kandev reaches each sandbox over HTTPS: by default

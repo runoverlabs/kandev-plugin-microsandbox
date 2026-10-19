@@ -9,7 +9,7 @@
 the differences from the original request are listed in
 [Changes from the request](#changes-from-the-request), and what is left in
 [Current state](#current-state).
-**Third request, 2026-10-19:** [F20](#f20-a-workspace-disk-at-workspace), from the first real run.
+**Third request, 2026-10-19:** [F20](#f20-a-workspace-disk-at-workspace), from the first real run. Released in 0.5.0.
 **Second request, 2026-10-19:** host-side TLS, [F16–F19](#request-2-host-side-tls-2026-10-19). Built and released in 0.4.0 (PR #62, then the lease-token fix `dec3dd2`, 2026-10-19). It changes F1, F4, F10 and F14 as marked there; what differs from the request is in [Changes from request 2](#changes-from-request-2).
 **Verbs since then:** list, inspect, find, stop, destroy, reap and proxy moved into msbctl's generic verbs and `host kandev`, before any of them shipped; the F-sections below keep the original request's names. The current shapes are in the [change notice](msbctl-kandev-verb-changes.md) and the [host protocol](host-protocol.md).
 **Design background:** [implementation plan](plans/implementation-plan.md), sections "Decision, Oct 19", "Host side" and "Data path"
@@ -958,9 +958,11 @@ slow for git and builds and has corrupted git's index in practice; it has
 no quota, so one build can fill the host; it puts what untrusted code wrote
 on the host's own filesystem; and a host path can outlive its sandbox.
 
-**Built** in msb-manager `main`
+**Built** and released in msb-manager
+[0.5.0](https://github.com/runoverlabs/sandbox-manager/releases/tag/v0.5.0)
 ([PR #65](https://github.com/runoverlabs/sandbox-manager/pull/65), merge
-`5e3bc64`, 2026-10-19), not released yet. One difference, an improvement:
+`5e3bc64`, 2026-10-19). Verified with Kandev on a real host: an agent ran in
+a 7 GiB ext4 `/workspace` on a stock image, and `purge` left no disk behind. One difference, an improvement:
 the disk is msb's **owned** kind (`--mount-owned
 /workspace:kind=disk,size=<n>G`), not a named `<prefix>-workspace` volume.
 msb deletes an owned disk with its VM, so nothing of a workspace outlives
