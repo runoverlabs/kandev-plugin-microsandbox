@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" alt="kandev-plugin-microsandbox: a Kandev-indigo node feeding a session into an msb-manager-purple microVM, drawn in dots" width="140" height="140">
+</p>
+
 # kandev-plugin-microsandbox
 
 Run each [Kandev](https://github.com/kdlbs/kandev) session in its own
@@ -53,6 +57,16 @@ Kandev's **Settings > Plugins**.
 
 [docs/configuration.md](docs/configuration.md) covers registering hosts and
 the executor profile fields.
+
+## Related projects
+
+- [msb-manager](https://github.com/runoverlabs/sandbox-manager) (`msbctl`):
+  the host side. Every sandbox host runs it, and this plugin drives it over
+  SSH; the [host protocol](docs/host-protocol.md) is the contract between them.
+- [kandev-plugin-forgejo](https://github.com/runoverlabs/kandev-plugin-forgejo):
+  the sibling Kandev plugin, connecting a self-hosted Forgejo or Gitea to
+  Kandev's repository, pull-request and review surfaces. The two share their
+  layout, build and release conventions.
 
 ## License
 

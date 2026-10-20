@@ -54,6 +54,7 @@ internal package of the Kandev module and cannot be imported from here.
 | `internal/hostsetup/` | Setting a machine up over an admin login (`hosts.setup`): steps, accounts, packages, firewall. |
 | `server/` | `main`: `pluginsdk.Serve`. |
 | `ui/` | The settings pages. `src/` is TypeScript over the host's React and components; `bundle.js` is built (`npm ci`, then `make test-ui` or `make ui/bundle.js`) and not committed. |
+| `assets/` | `icon.svg`, the manifest's icon: a 16×16 dot grid in the style of the forgejo plugin's and msb-manager's. |
 
 The UI resolves `@kandev/plugin-sdk` from the sibling checkout, like the Go
 module. `npm install` hits an npm resolver bug on that linked package

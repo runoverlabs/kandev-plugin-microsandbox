@@ -10,6 +10,7 @@ description: "Run each Kandev session in its own microsandbox microVM on registe
 author: "naerymdan"
 repo_url: "https://github.com/runoverlabs/kandev-plugin-microsandbox"
 categories: ["tools"]
+icon: "assets/icon.svg"
 
 # Remote executor plugins are on by default from v0.97.0, and this is the
 # release the provider contract here was read from.
