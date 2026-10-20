@@ -15,23 +15,26 @@ reach. Each host is an ordinary [msb-manager](https://github.com/runoverlabs/san
 install, driven over SSH through a restricted forced command
 (`msbctl host serve --kandev`). No daemon, port or token scheme of its own.
 
-> **Status: early development.** The host registry, profile validation,
-> placement, the provider's whole lifecycle (provision, connect, inspect,
-> recover, attach, destroy) and the root certificate are built. A whole agent
-> session has run against Kandev 0.97.0 and a real msb-manager 0.5.0 host;
-> the known gaps, mostly on Kandev's side, are listed in
-> [configuration](docs/configuration.md#what-kandev-and-the-network-need). See the [implementation plan](docs/plans/implementation-plan.md)
-> for the phases, the [host protocol](docs/host-protocol.md) for what a
-> sandbox host must answer, and the [msbctl feature request](docs/msbctl-feature-request.md)
-> for how the host side was built.
+> **Status: 0.1.0, the first release.** The provider's whole lifecycle
+> (provision, connect, inspect, recover, attach, destroy), the host registry
+> with setup and upgrades, the root certificate, central egress and secrets,
+> and the settings pages are built. Whole agent sessions have run against
+> Kandev 0.97.0 and a real msb-manager host; the known gaps, mostly on
+> Kandev's side, are listed in
+> [configuration](docs/configuration.md#what-kandev-and-the-network-need). See
+> the [host protocol](docs/host-protocol.md) for what a sandbox host must
+> answer, and the [msbctl feature request](docs/msbctl-feature-request.md) for
+> how the host side was built.
 
 ## What it adds
 
 | Surface | What you get |
 | --- | --- |
-| Executor provider `microsandbox` | An executor profile type: placement, digest-pinned image, CPUs, memory, disk, lifetime, extra egress, environment, registry credentials and up to three host-bound secrets. Profiles are validated on save, including that the placement selects a registered, non-draining host. |
-| Sandbox host registry | Admin-only actions to list, scan (trust on first use), add, update, drain, remove and test hosts. A host that still has sandboxes cannot be removed. |
+| Executor provider `microsandbox` | An executor profile type: placement, digest-pinned image, CPUs, memory, workspace disk, lifetime, egress groups and extra egress, environment, registry credentials and the plugin secrets it uses. Profiles are validated on save, including that the placement selects a registered, non-draining host. |
+| Sandbox hosts | Register, test, drain and remove hosts (a host that still has sandboxes cannot be removed); set up a bare KVM machine from a one-off admin login; update a host's msb-manager. |
 | Root certificate | A name-constrained root the Kandev server trusts for sandbox hosts only; host certificates are issued and renewed automatically. |
+| Egress and secrets | Named egress groups with defaults applied to every sandbox, and secrets kept by the plugin that profiles name but can never read. |
+| Settings pages | Readiness on the plugin's settings page, then **Sandbox hosts**, **Sandbox egress** and **Sandbox secrets**. |
 
 ## Requirements
 
@@ -49,9 +52,14 @@ install, driven over SSH through a restricted forced command
 
 ## Install
 
-Releases are not published yet. To build a package from source, see
-[docs/development.md](docs/development.md), then install the tarball through
-Kandev's **Settings > Plugins**.
+1. Download `kandev-plugin-microsandbox-<version>.tar.gz` from
+   [Releases](https://github.com/runoverlabs/kandev-plugin-microsandbox/releases).
+2. In Kandev: **Settings → Plugins → Install from file**.
+3. Follow the readiness list on the plugin's settings page: create and trust
+   the root certificate, then set up or add a sandbox host.
+
+To build a package from source instead, see
+[docs/development.md](docs/development.md).
 
 ## Configuration
 
