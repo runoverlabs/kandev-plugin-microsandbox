@@ -92,12 +92,13 @@ security-deps:
 	go run $(GOVULNCHECK) ./...
 
 # The package carries the built bundle and its stylesheet, not the UI's
-# sources or tests.
+# sources or tests, and the icon the manifest names.
 define stage
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server $(STAGE)/ui
 	cp manifest.yaml $(STAGE)/manifest.yaml
 	cp ui/bundle.js ui/plugin.css $(STAGE)/ui/
+	cp -r assets $(STAGE)/assets
 endef
 
 ## Every platform in manifest.yaml's runtime.executables, packed for release.
@@ -130,6 +131,7 @@ verify-package: package
 		test -f "$$tmp/ui/bundle.js"; \
 		test -f "$$tmp/ui/plugin.css"; \
 		test ! -e "$$tmp/ui/src"; \
+		test -f "$$tmp/assets/icon.svg"; \
 		for platform in $(PLATFORMS); do \
 			os="$${platform%/*}"; arch="$${platform#*/}"; ext=""; \
 			[ "$$os" = windows ] && ext=".exe"; \
@@ -147,6 +149,7 @@ verify-package-host: package-host
 		test -f "$$tmp/checksums.txt"; \
 		test -f "$$tmp/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE)"; \
 		test -f "$$tmp/ui/bundle.js"; \
+		test -f "$$tmp/assets/icon.svg"; \
 		(cd "$$tmp" && sha256sum -c checksums.txt)
 	@echo "verify-package-host OK"
 
