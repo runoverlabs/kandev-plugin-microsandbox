@@ -2,9 +2,13 @@
 
 ## Unreleased
 
-First development snapshot: the host registry, the provider's lifecycle and
-the root certificate. A whole agent session has run against Kandev 0.97.0
-and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
+## 0.1.0
+
+First release: the host registry, the provider's lifecycle, the root
+certificate, central egress and secrets, host setup and upgrades, and the
+settings pages. Whole agent sessions have run against Kandev 0.97.0 and a
+real host. Needs Kandev 0.97.0 or newer; sandbox hosts need msb-manager 0.5.0
+or newer, and 0.6.0 or newer for `hosts.upgrade`.
 
 - Executor provider `microsandbox` with the full profile schema. Profiles are
   validated on save: digest-pinned image, resource bounds, egress entries,
@@ -98,8 +102,8 @@ and a real host. Sandbox hosts need msb-manager 0.5.0 or newer.
   steps for the Kandev server. Host certificates are issued at `hosts.add`
   and re-issued automatically (missing, expiring within 30 days, another
   name, or a replaced root) every 6 hours and on `hosts.test`, which also
-  reports whether the Kandev server trusts the root. Needs msbctl's
-  `serve = "proxy"` (not built yet) to take effect.
+  reports whether the Kandev server trusts the root. Used by hosts with
+  msbctl's `serve = "proxy"`.
 - Profile validation follows what msbctl accepts, so a profile it would
   refuse at launch is refused on save: uppercase variable names only, the
   wider reserved-name list (`PATH`, `HOME`, `LD_*`, `MSB_*`, `SSH_*`, …), a
