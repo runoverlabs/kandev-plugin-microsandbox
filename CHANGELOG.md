@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.1
+
+Private names, for a sandbox that must reach a host on the LAN with a bound
+secret, such as a self-hosted Forgejo. Needs msb-manager 0.7.0 on hosts that
+serve such profiles; other hosts keep working with 0.5.0 or newer.
+
 - Profile field `private_names`: exact hostnames a sandbox may resolve to a
   private (LAN) address, such as a self-hosted forge a secret is bound to.
   Each must also be in `egress_allow`. Needs msb-manager 0.7.0 on the host,
@@ -9,6 +15,7 @@
   save unless a host its placement selects allows the names, and placement
   skips hosts that do not.
 - `hosts.setup` and `hosts.upgrade` install msb-manager 0.7.0.
+- Release and CI builds use Go 1.26.10 (GO-2026-6809, crypto/x509).
 
 ## 0.1.0
 
