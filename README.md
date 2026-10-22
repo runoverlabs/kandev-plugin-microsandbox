@@ -15,7 +15,7 @@ reach. Each host is an ordinary [msb-manager](https://github.com/runoverlabs/san
 install, driven over SSH through a restricted forced command
 (`msbctl host serve --kandev`). No daemon, port or token scheme of its own.
 
-> **Status: 0.1.0, the first release.** The provider's whole lifecycle
+> **Status: 0.1.1.** The provider's whole lifecycle
 > (provision, connect, inspect, recover, attach, destroy), the host registry
 > with setup and upgrades, the root certificate, central egress and secrets,
 > and the settings pages are built. Whole agent sessions have run against
@@ -42,7 +42,8 @@ install, driven over SSH through a restricted forced command
   are on by default.
 - Sandbox hosts: Linux with KVM, set up as msb-manager remotes, with
   msb-manager **0.5.0** or newer (msbctl speaking
-  [host protocol](docs/host-protocol.md) version 1).
+  [host protocol](docs/host-protocol.md) version 1), and **0.7.0** or newer
+  for profiles with `private_names`.
 - A private network between Kandev and the hosts: Tailscale, headscale,
   WireGuard or a LAN. Kandev reaches each sandbox over HTTPS: by default
   through a TLS proxy on each host (`[kandev] serve = "proxy"`) with a
