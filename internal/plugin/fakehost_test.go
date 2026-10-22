@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,9 @@ type fakeMsbctl struct {
 	provReqs  []msbctl.ProvisionRequest
 	leaseHdr  map[string]string
 	created   int
+	// privateNames is the host's [kandev] private_names; nil is a host
+	// without the feature (msb-manager before 0.7.0).
+	privateNames []string
 }
 
 func newFakeMsbctl(name string) *fakeMsbctl {
@@ -81,13 +85,18 @@ func (f *fakeMsbctl) handle(command string, stdin []byte) sshtest.Reply {
 		if f.full {
 			max = used
 		}
-		return jsonReply(map[string]any{
+		health := map[string]any{
 			"protocol": 1, "kvm": true, "enabled": true, "platform": "linux-amd64",
 			"capacity": map[string]any{"max_sandboxes": max, "sandboxes": used, "max_cpus": 64, "max_memory_mib": 1 << 20},
 			"serve":    map[string]any{"ok": true, "mode": "none"},
 			"tls":      map[string]any{"installed": false},
 			"features": msbctl.RequiredFeatures,
-		})
+		}
+		if f.privateNames != nil {
+			health["features"] = append(slices.Clone(msbctl.RequiredFeatures), msbctl.FeaturePrivateNames)
+			health["egress"] = map[string]any{"allow_extra": []string{"*"}, "private_names": f.privateNames}
+		}
+		return jsonReply(health)
 	case "provision":
 		return f.provision(rest[0], stdin)
 	case "agentctl":
@@ -170,6 +179,17 @@ func (f *fakeMsbctl) provision(env string, stdin []byte) sshtest.Reply {
 	}
 	if f.full {
 		return sshtest.Reply{Stdout: `{"error":{"code":"rate_limited","retry_after_seconds":30}}`, Status: 3}
+	}
+	// As msbctl 0.7.0's kandev_private_names: each name allowed by the host
+	// and the host of one of the request's egress_allow entries.
+	for _, name := range req.PrivateNames {
+		inEgress := slices.ContainsFunc(req.EgressAllow, func(e string) bool {
+			host, _, _ := strings.Cut(e, ":")
+			return host == name
+		})
+		if !slices.Contains(f.privateNames, name) || !inEgress {
+			return errReply("invalid_config")
+		}
 	}
 	f.provReqs = append(f.provReqs, req)
 	f.created++

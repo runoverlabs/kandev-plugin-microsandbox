@@ -94,7 +94,7 @@ func TestManifestProviderMatchesTheCode(t *testing.T) {
 		profile.FieldPlacement, profile.FieldImage, profile.FieldCPUs, profile.FieldMemoryMiB,
 		profile.FieldDiskGiB, profile.FieldWorkspaceGiB, profile.FieldMaxLifetimeHours, profile.FieldRetainHours,
 		profile.FieldEgressAllow, profile.FieldEgressGroups, profile.FieldEnv, profile.FieldRegistryUsername, profile.FieldRegistryPassword,
-		profile.FieldSecrets,
+		profile.FieldSecrets, profile.FieldPrivateNames,
 	}
 	// The secrets field only names the plugin's secrets, so it is not one.
 	secret := map[string]bool{profile.FieldRegistryPassword: true}

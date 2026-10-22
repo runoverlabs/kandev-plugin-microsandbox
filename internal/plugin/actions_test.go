@@ -247,6 +247,6 @@ func TestOutdatedHostIsDiagnosedAndNeverPlaced(t *testing.T) {
 	require.NoError(t, err)
 	registry, err := r.loadRegistry(t.Context())
 	require.NoError(t, err)
-	_, err = hosts.Place(t.Context(), registry.Hosts, placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
+	_, err = hosts.Place(t.Context(), registry.Hosts, &placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
 	assert.ErrorIs(t, err, hosts.ErrUnreachable, "an outdated host is not a candidate")
 }

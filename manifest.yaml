@@ -207,6 +207,10 @@ executor_providers:
           type: string
           title: "Secrets"
           description: "Comma-separated names of secrets kept by the plugin (its Secrets page), such as NPM_TOKEN. The guest sees each as a variable holding a placeholder; the sandbox host substitutes the value into request headers bound for that secret's hosts only."
+        private_names:
+          type: string
+          title: "Private names"
+          description: "Comma-separated exact hostnames this sandbox may resolve to a private (LAN) address, such as a self-hosted forge. Each must also be in Extra egress, and the host must allow it in its [kandev] private_names (msb-manager 0.7.0). The sandbox then runs without DNS rebind protection and every other private destination is denied."
     # Only what routes later calls: the host that owns the sandbox, its
     # name there and the environment id. Never a secret, a nonce or a lease.
     resource_state_schema:

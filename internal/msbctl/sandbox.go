@@ -80,6 +80,10 @@ type ProvisionRequest struct {
 	ExpiresAt    string    `json:"expires_at"`
 	KandevAPI    KandevAPI `json:"kandev_api"`
 	EgressAllow  []string  `json:"egress_allow,omitempty"`
+	// PrivateNames are hosts this sandbox may resolve to a private address.
+	// Each is also in EgressAllow, and the host must list FeaturePrivateNames
+	// and allow the name in `[kandev] private_names`.
+	PrivateNames []string  `json:"private_names,omitempty"`
 	Env          []EnvVar  `json:"env,omitempty"`
 	Secrets      []Secret  `json:"secrets,omitempty"`
 	Registry     *Registry `json:"registry,omitempty"`

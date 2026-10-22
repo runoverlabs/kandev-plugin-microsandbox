@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Profile field `private_names`: exact hostnames a sandbox may resolve to a
+  private (LAN) address, such as a self-hosted forge a secret is bound to.
+  Each must also be in `egress_allow`. Needs msb-manager 0.7.0 on the host,
+  with the name in its `[kandev] private_names`; a profile is refused on
+  save unless a host its placement selects allows the names, and placement
+  skips hosts that do not.
+- `hosts.setup` and `hosts.upgrade` install msb-manager 0.7.0.
+
 ## 0.1.0
 
 First release: the host registry, the provider's lifecycle, the root

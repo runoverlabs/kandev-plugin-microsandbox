@@ -82,6 +82,13 @@ const (
 // agent; so the plugin refuses such a host.
 const FeatureWorkspaceDisk = "workspace_disk"
 
+// FeaturePrivateNames is a host that accepts a provision's `private_names`
+// (msb-manager 0.7.0): hosts that may resolve to a private address, such as
+// a LAN forge a bound token goes to. msbctl turns msb's DNS rebind protection
+// off for that sandbox and denies every other private destination in its
+// place. Optional: only a profile that asks for private names needs it.
+const FeaturePrivateNames = "private_names"
+
 // RequiredFeatures are the health features a host must list.
 var RequiredFeatures = []string{FeatureWorkspaceDisk}
 
@@ -175,9 +182,30 @@ func (h *Health) clean() {
 }
 
 // EgressPolicy is the host's `[kandev] allow_extra`: "*", hostname patterns
-// and, with F21, addresses, address:port entries and CIDRs.
+// and, with F21, addresses, address:port entries and CIDRs. PrivateNames is
+// `[kandev] private_names` (0.7.0): the exact hostnames a provision may ask
+// to resolve to a private address.
 type EgressPolicy struct {
-	AllowExtra []string `json:"allow_extra"`
+	AllowExtra   []string `json:"allow_extra"`
+	PrivateNames []string `json:"private_names,omitempty"`
+}
+
+// AllowsPrivateNames reports whether the host takes a provision asking for
+// these names: it lists FeaturePrivateNames and its operator allows each one.
+// No names needs nothing.
+func (h Health) AllowsPrivateNames(names []string) bool {
+	if len(names) == 0 {
+		return true
+	}
+	if !slices.Contains(h.Features, FeaturePrivateNames) || h.Egress == nil {
+		return false
+	}
+	for _, name := range names {
+		if !slices.Contains(h.Egress.PrivateNames, name) {
+			return false
+		}
+	}
+	return true
 }
 
 // Missing returns the required features the host does not list.
