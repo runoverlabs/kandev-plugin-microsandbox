@@ -249,6 +249,31 @@ func TestParseSecretNames(t *testing.T) {
 	assert.Equal(t, []FieldError{{FieldSecrets, CodeDuplicate}}, errs, "the same variable twice in the guest")
 }
 
+func TestParsePrivateNames(t *testing.T) {
+	spec, errs := Parse(with(validConfig(),
+		FieldEgressAllow, "git.example.com, forge.example.com:8443",
+		FieldPrivateNames, " Git.Example.com, forge.example.com,git.example.com,, "), nil)
+	require.Empty(t, errs)
+	assert.Equal(t, []string{"git.example.com", "forge.example.com"}, spec.PrivateNames,
+		"lowercased, deduplicated; any port of an egress entry counts, as msbctl compares hosts")
+
+	spec, errs = Parse(validConfig(), nil)
+	require.Empty(t, errs)
+	assert.Empty(t, spec.PrivateNames, "optional")
+
+	for raw, code := range map[string]string{
+		"other.example.com":     CodeNotInEgress,
+		"*.example.com":         CodeInvalid,
+		"git.example.com:443":   CodeInvalid,
+		"192.168.2.6":           CodeInvalid,
+		"localhost":             CodeInvalid,
+		"git.example.com, a b.": CodeInvalid,
+	} {
+		_, errs := Parse(with(validConfig(), FieldEgressAllow, "git.example.com", FieldPrivateNames, raw), nil)
+		assert.Equal(t, []FieldError{{FieldPrivateNames, code}}, errs, raw)
+	}
+}
+
 func TestSecretNameAndHosts(t *testing.T) {
 	assert.Empty(t, CheckSecretName("NPM_TOKEN"))
 	assert.Equal(t, CodeRequired, CheckSecretName(""))

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -263,9 +264,10 @@ func provisionRequest(spec profile.Spec, rc *pluginsdk.ExecutorProviderRequestCo
 	out := msbctl.ProvisionRequest{
 		OperationID: rc.GetOperationId(), InputDigest: rc.GetInputDigest(),
 		Image: spec.Image, CPUs: spec.CPUs, MemoryMiB: spec.MemoryMiB, DiskGiB: spec.DiskGiB, WorkspaceGiB: spec.WorkspaceGiB,
-		ExpiresAt:   now.UTC().Add(time.Duration(spec.MaxLifetimeHours) * time.Hour).Format(time.RFC3339),
-		KandevAPI:   api,
-		EgressAllow: spec.EgressAllow,
+		ExpiresAt:    now.UTC().Add(time.Duration(spec.MaxLifetimeHours) * time.Hour).Format(time.RFC3339),
+		KandevAPI:    api,
+		EgressAllow:  spec.EgressAllow,
+		PrivateNames: spec.PrivateNames,
 	}
 	for _, e := range spec.Env {
 		out.Env = append(out.Env, msbctl.EnvVar{Name: e.Name, Value: e.Value})
@@ -287,10 +289,15 @@ func (r *Runtime) placeOrReuse(ctx context.Context, client *msbctl.Client, regis
 	if found := findOperation(ctx, client, candidates, rc.GetOperationId()); found.ok {
 		return found.host, nil
 	}
-	host, err := hosts.Place(ctx, candidates, placementProber{r: r, client: client}, hosts.Demand{CPUs: spec.CPUs, MemoryMiB: spec.MemoryMiB})
+	prober := &placementProber{r: r, client: client, privateNames: spec.PrivateNames}
+	host, err := hosts.Place(ctx, candidates, prober, hosts.Demand{CPUs: spec.CPUs, MemoryMiB: spec.MemoryMiB})
 	switch {
 	case err == nil:
 		return host, nil
+	case errors.Is(err, hosts.ErrUnreachable) && int(prober.refused.Load()) == len(candidates):
+		// Every candidate answered, and none takes this profile's private
+		// names: a profile or host configuration problem, not an outage.
+		return hosts.Host{}, providerError(msbctl.CodeInvalidConfig, "privateNamesUnsupported")
 	case errors.Is(err, hosts.ErrAllFull):
 		e := providerError(msbctl.CodeRateLimited, "hostsFull")
 		e.RetryAfterSeconds = 30
@@ -304,13 +311,16 @@ func (r *Runtime) placeOrReuse(ctx context.Context, client *msbctl.Client, regis
 
 // placementProber heals a proxy host's certificate before it is counted as
 // a candidate, so a host whose certificate lapsed takes sessions again as
-// soon as it is asked to.
+// soon as it is asked to. A host that does not take the profile's private
+// names is no candidate; refused counts them.
 type placementProber struct {
-	r      *Runtime
-	client *msbctl.Client
+	r            *Runtime
+	client       *msbctl.Client
+	privateNames []string
+	refused      atomic.Int32
 }
 
-func (p placementProber) Capacity(ctx context.Context, h hosts.Host) (hosts.Capacity, error) {
+func (p *placementProber) Capacity(ctx context.Context, h hosts.Host) (hosts.Capacity, error) {
 	health, err := p.client.Health(ctx, h)
 	if err != nil {
 		return hosts.Capacity{}, err
@@ -324,6 +334,10 @@ func (p placementProber) Capacity(ctx context.Context, h hosts.Host) (hosts.Capa
 	}
 	if !health.Usable() {
 		return hosts.Capacity{}, &msbctl.Error{Code: msbctl.CodeUnavailable}
+	}
+	if !health.AllowsPrivateNames(p.privateNames) {
+		p.refused.Add(1)
+		return hosts.Capacity{}, &msbctl.Error{Code: msbctl.CodeUnsupported}
 	}
 	return health.Capacity, nil
 }

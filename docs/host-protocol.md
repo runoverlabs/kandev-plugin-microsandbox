@@ -89,9 +89,13 @@ raw bytes whose length the header gives. The verbs below take no stdin yet.
   `workspace_disk` (feature request F20) and reports a host without it as
   `outdated`: msb-manager 0.4.0 ignores `workspace_gib` and would provision
   sandboxes with no `/workspace`.
+- `features` may also list `private_names` (msb-manager 0.7.0), which is
+  optional: only a profile with `private_names` needs it (see `provision`).
 - `egress` (optional, feature request F21) is `{"allow_extra": [...]}`, the
   host's bound on provision's `egress_allow`. When present, Test checks the
-  plugin's default egress groups against it.
+  plugin's default egress groups against it. From 0.7.0 it also carries
+  `private_names`, the host's `[kandev] private_names`: the exact hostnames a
+  provision may ask to resolve to a private address.
 - `host` (optional, feature request F22) describes the machine, for the
   operator: `os` (`/etc/os-release` `PRETTY_NAME`), `kernel`, `cpus`,
   `memory_total_mib`, `memory_available_mib`, `load_1m`, `disk_total_gib`
@@ -181,6 +185,17 @@ unknown while any host did not.
 groups, the profile's groups, its own entries): `host`, `*.suffix`,
 `host:port`, `address`, `address:port` or `[v6]:port`, each one msbctl's
 `parse_allow_target` accepts.
+
+`provision`'s `private_names` (msb-manager 0.7.0, omitted when empty) lists
+exact hostnames the sandbox may resolve to a private address, such as a LAN
+forge that a bound secret goes to. msbctl runs that sandbox with msb's DNS
+rebind protection off and denies every other private destination in its
+place, ordered after the requested names and every address rule. It refuses
+the provision (`invalid_config`) unless each name is in the host's
+`[kandev] private_names` and is the host of one of the request's
+`egress_allow` entries. The plugin checks the same before sending: a profile
+asking for a name is refused on save unless some candidate host's last check
+lists the feature and allows it, and placement skips hosts that do not.
 
 `NAME` is always the record's `name`, stored in the resource state, never
 derived from the env id. The argv shapes are exact: `host serve --kandev`

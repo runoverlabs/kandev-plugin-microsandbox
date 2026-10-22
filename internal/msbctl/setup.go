@@ -37,11 +37,12 @@ var (
 		URL:     "https://github.com/superradcompany/microsandbox/releases/download/v0.7.7/install.sh",
 		SHA256:  "767df6954e09fec9bf8276cc2858fc9038024b3a22fa4740572620370eb719f4",
 	}
-	// 0.6.1: `host kandev configure` (F23, since 0.6.0) for setup, and an
-	// update that restarts the proxy onto the new release (F25).
+	// 0.7.0: `[kandev] private_names`. Since 0.6.0 `host kandev configure`
+	// (F23) for setup, since 0.6.1 an update that restarts the proxy onto
+	// the new release (F25). get.sh is unchanged since 0.6.1.
 	ManagerPin = Pin{
-		Version: "0.6.1",
-		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.6.1/get.sh",
+		Version: "0.7.0",
+		URL:     "https://github.com/runoverlabs/sandbox-manager/releases/download/v0.7.0/get.sh",
 		SHA256:  "c639ed0b4d9f23a934cff95702168ff8ad98cb0b7aa1b49e53ee9ea5bce4fa78",
 	}
 )

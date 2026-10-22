@@ -94,6 +94,25 @@ func TestHealthRefusesAHostWithoutRequiredFeatures(t *testing.T) {
 	assert.Equal(t, []string{FeatureWorkspaceDisk}, health.Missing())
 }
 
+func TestHealthAllowsPrivateNames(t *testing.T) {
+	decode := func(body string) Health {
+		var h Health
+		require.NoError(t, json.Unmarshal([]byte(body), &h))
+		return h
+	}
+	current := decode(`{"features":["workspace_disk","private_names"],"egress":{"allow_extra":["*"],"private_names":["git.lan.example","forge.lan.example"]}}`)
+	assert.True(t, current.AllowsPrivateNames(nil), "no names needs nothing")
+	assert.True(t, current.AllowsPrivateNames([]string{"git.lan.example"}))
+	assert.True(t, current.AllowsPrivateNames([]string{"git.lan.example", "forge.lan.example"}))
+	assert.False(t, current.AllowsPrivateNames([]string{"git.lan.example", "other.lan.example"}), "every name must be allowed")
+
+	older := decode(`{"features":["workspace_disk"],"egress":{"allow_extra":["*"],"private_names":["git.lan.example"]}}`)
+	assert.False(t, older.AllowsPrivateNames([]string{"git.lan.example"}), "the feature must be listed")
+	assert.True(t, older.AllowsPrivateNames(nil))
+	unreported := decode(`{"features":["workspace_disk","private_names"]}`)
+	assert.False(t, unreported.AllowsPrivateNames([]string{"git.lan.example"}), "no egress report allows nothing")
+}
+
 func TestCapacityRequiresAUsableHost(t *testing.T) {
 	for _, body := range []string{
 		`{"protocol":1,"kvm":false,"enabled":true,"serve":{"ok":true},"tls":{"installed":false},"features":["workspace_disk"]}`,

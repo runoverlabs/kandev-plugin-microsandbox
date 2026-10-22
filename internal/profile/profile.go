@@ -34,6 +34,7 @@ const (
 	FieldRegistryUsername = "registry_username"
 	FieldRegistryPassword = "registry_password"
 	FieldSecrets          = "secrets"
+	FieldPrivateNames     = "private_names"
 )
 
 // Defaults for optional fields. The manifest schema has no `default`
@@ -59,6 +60,9 @@ const (
 	// CodeNoRegistry: a private image must name its registry host, which is
 	// where the host scopes the pull credentials.
 	CodeNoRegistry = "no_registry"
+	// CodeNotInEgress: a private name must also be reachable through the
+	// profile's own egress_allow; resolving is all a private name grants.
+	CodeNotInEgress = "not_in_egress"
 )
 
 // FieldError is one rejected field. Message text is never carried: Kandev
@@ -125,6 +129,11 @@ type Spec struct {
 	// values and hosts; Secrets is filled from them at provision.
 	SecretNames []string
 	Secrets     []Secret
+	// PrivateNames are exact hostnames this sandbox may resolve to a private
+	// address (a LAN forge, say). The host turns DNS rebind protection off
+	// for it and denies every other private destination instead. Each is
+	// also in EgressAllow.
+	PrivateNames []string
 }
 
 // NamePattern is the shape of a host name and a host label. Host names end
@@ -261,7 +270,42 @@ func Parse(config, secrets map[string]string) (Spec, []FieldError) {
 		add(FieldSecrets, code)
 	}
 	spec.SecretNames = names
+
+	private, code := parsePrivateNames(value(config, FieldPrivateNames), spec.EgressAllow)
+	if code != "" {
+		add(FieldPrivateNames, code)
+	}
+	spec.PrivateNames = private
 	return spec, errs
+}
+
+// parsePrivateNames reads the comma-separated hostnames a profile asks to
+// resolve privately: exact names, no wildcard, port or address, each the host
+// of one of the profile's egress_allow entries (msbctl's own rule). Whether a
+// host allows them is the registry's question, not this package's.
+func parsePrivateNames(raw string, egressAllow []string) ([]string, string) {
+	hosts := make(map[string]bool, len(egressAllow))
+	for _, entry := range egressAllow {
+		host, _, _ := strings.Cut(entry, ":")
+		hosts[host] = true
+	}
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(item))
+		if name == "" {
+			continue
+		}
+		if strings.Contains(name, ":") || !validHostEntry(name, false) {
+			return nil, CodeInvalid
+		}
+		if !hosts[name] {
+			return nil, CodeNotInEgress
+		}
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out, ""
 }
 
 // parseSecretNames reads the comma-separated secret names a profile uses.

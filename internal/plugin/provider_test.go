@@ -417,3 +417,65 @@ func TestProvisionRefusesARequestLargerThanTheHeader(t *testing.T) {
 	assert.Equal(t, "provider.microsandbox.requestTooLarge", res.Error.MessageId)
 	assert.Empty(t, f.hosts["sbx-01"].provReqs, "nothing is sent")
 }
+
+func privateProfile(names string) *pluginsdk.ExecutorProfileSnapshot {
+	config := profileConfig("label:default")
+	config["egress_allow"] = "git.lan.example"
+	config["private_names"] = names
+	return &pluginsdk.ExecutorProfileSnapshot{ProfileId: "p1", Config: config}
+}
+
+func TestProvisionSendsPrivateNames(t *testing.T) {
+	f := newProviderFixture(t, "sbx-01")
+	f.hosts["sbx-01"].privateNames = []string{"git.lan.example"}
+	res := f.provision(t, "env-1", "op-1", privateProfile("git.lan.example"))
+	require.Nil(t, res.Error, "%v", res.Error)
+	req := f.hosts["sbx-01"].provReqs[0]
+	assert.Equal(t, []string{"git.lan.example"}, req.PrivateNames)
+	assert.Contains(t, req.EgressAllow, "git.lan.example", "each name is also an egress entry")
+}
+
+func TestProvisionPlacesOnlyOnHostsThatTakeThePrivateNames(t *testing.T) {
+	f := newProviderFixture(t, "sbx-01", "sbx-02", "sbx-03")
+	f.hosts["sbx-02"].privateNames = []string{"git.lan.example"}
+	f.hosts["sbx-03"].privateNames = []string{"other.lan.example"}
+	res := f.provision(t, "env-1", "op-1", privateProfile("git.lan.example"))
+	require.Nil(t, res.Error, "%v", res.Error)
+	assert.Equal(t, "msb:sbx-02/k-env-1", res.Resource.ResourceHandle)
+	assert.Equal(t, 0, f.hosts["sbx-01"].count()+f.hosts["sbx-03"].count())
+}
+
+func TestProvisionRefusesPrivateNamesNoHostTakes(t *testing.T) {
+	f := newProviderFixture(t, "sbx-01", "sbx-02")
+	f.hosts["sbx-02"].privateNames = []string{"other.lan.example"}
+	res := f.provision(t, "env-1", "op-1", privateProfile("git.lan.example"))
+	require.NotNil(t, res.Error)
+	assert.Equal(t, "invalid_config", res.Error.Code)
+	assert.Equal(t, "provider.microsandbox.privateNamesUnsupported", res.Error.MessageId)
+	assert.Equal(t, 0, f.hosts["sbx-01"].count()+f.hosts["sbx-02"].count(), "nothing created")
+
+	// A profile without private names still places on either.
+	plain := f.provision(t, "env-2", "op-2", fullProfile())
+	require.Nil(t, plain.Error, "%v", plain.Error)
+}
+
+func TestValidatePrivateNamesAgainstTheHostsLastCheck(t *testing.T) {
+	f := newProviderFixture(t, "sbx-01")
+	config := privateProfile("git.lan.example").Config
+	codes := func() map[string]string { return fieldCodes(validate(t, f.r, config, nil)) }
+	check := func() { require.Equal(t, 200, first(call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"}))) }
+
+	check()
+	assert.Equal(t, map[string]string{"private_names": CodeUnsupported}, codes(), "a host without the feature")
+
+	f.hosts["sbx-01"].privateNames = []string{"other.lan.example"}
+	check()
+	assert.Equal(t, map[string]string{"private_names": CodeUnsupported}, codes(), "a host that does not allow the name")
+
+	f.hosts["sbx-01"].privateNames = []string{"git.lan.example"}
+	check()
+	assert.Empty(t, codes())
+
+	config["egress_allow"] = ""
+	assert.Equal(t, "not_in_egress", codes()["private_names"])
+}
