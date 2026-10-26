@@ -141,10 +141,15 @@ func TestLoadRootRoundTrips(t *testing.T) {
 	assert.NoError(t, err)
 
 	_, otherKey, _ := newRoot(t, tailnet())
+	// Each is a root only replacing fixes, not a failure to read the store.
 	_, err = LoadRoot(certPEM, otherKey)
-	assert.Error(t, err, "a key from another root is refused")
+	assert.ErrorIs(t, err, ErrRootUnusable, "a key from another root is refused")
 	_, err = LoadRoot("garbage", keyPEM)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrRootUnusable)
+	_, err = LoadRoot(certPEM, "garbage")
+	assert.ErrorIs(t, err, ErrRootUnusable)
+	_, err = LoadRoot(certPEM, "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n")
+	assert.ErrorIs(t, err, ErrRootUnusable)
 }
 
 func TestRenewReason(t *testing.T) {

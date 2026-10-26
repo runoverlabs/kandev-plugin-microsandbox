@@ -28,6 +28,9 @@ const (
 	secretValuePrefix = store.SecretValuePrefix
 )
 
+// Where the plugin keeps the hosts' last check results in Host state.
+const statusKey = store.StatusKey
+
 func newRuntime(t *testing.T, host pluginsdk.Host) *Runtime {
 	t.Helper()
 	r := NewRuntime()

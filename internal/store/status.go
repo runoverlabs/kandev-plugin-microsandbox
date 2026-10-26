@@ -15,7 +15,7 @@ import (
 // SSH round trip per host. It is written by Test and by every maintainer
 // pass, and holds nothing secret: a health report, the diagnosis and when it
 // was made.
-const statusKey = "status"
+const StatusKey = "status"
 
 // Status keeps the hosts' last checks as one Host state document. It is a
 // cache: an unreadable one is replaced, and a failed write is only logged.
@@ -37,7 +37,7 @@ func (s *Status) Load(ctx context.Context) (map[string]hostcheck.Status, error) 
 		return nil, err
 	}
 	out := map[string]hostcheck.Status{}
-	_, err = kandev.LoadDocument(ctx, h, statusKey, &out)
+	_, err = kandev.LoadDocument(ctx, h, StatusKey, &out)
 	switch {
 	case errors.Is(err, kandev.ErrUnreadable):
 		return map[string]hostcheck.Status{}, nil
@@ -72,7 +72,7 @@ func (s *Status) mutate(ctx context.Context, change func(map[string]hostcheck.St
 	if err != nil {
 		return
 	}
-	if err := kandev.SaveDocument(ctx, h, statusKey, all); err != nil {
+	if err := kandev.SaveDocument(ctx, h, StatusKey, all); err != nil {
 		log.Printf("status: %v", err)
 	}
 }

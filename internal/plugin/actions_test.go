@@ -104,7 +104,7 @@ func TestAnUnreadableKeyIsNamed(t *testing.T) {
 type statusOutage struct{ *fakeHost }
 
 func (h statusOutage) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
-	if key == "status" {
+	if key == statusKey {
 		return nil, false, errors.New("state store down")
 	}
 	return h.fakeHost.GetState(ctx, scope, scopeID, key)
