@@ -51,7 +51,7 @@ function mount(answers: Array<SetupJob | { status: number }>, props: Omit<JobVie
     run.forEach((f) => f());
   }
   render();
-  return { calls, error: () => slots[1] };
+  return { calls, job: () => slots[0] as SetupJob, error: () => slots[1] };
 }
 
 const running: SetupJob = { id: "j1", name: "sbx-01", state: "running", steps: [] };
@@ -78,10 +78,13 @@ describe("job view", () => {
     expect(onFinished).toHaveBeenCalledOnce();
   });
 
-  it("stops following a job the plugin no longer knows", async () => {
-    const view = mount([{ status: 404 }], { onFinished: vi.fn() }, running);
+  it("ends a job the plugin no longer knows, so it can be run again", async () => {
+    const onFinished = vi.fn();
+    const view = mount([{ status: 404 }], { onFinished }, running);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(view.calls).toHaveLength(1);
     expect(view.error()).not.toBeNull();
+    expect(view.job().state).toBe("failed");
+    expect(onFinished).toHaveBeenCalledOnce();
   });
 });

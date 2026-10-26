@@ -37,8 +37,14 @@ export function createJobView(host: PluginHostApi): Component<JobViewProps> {
             if (controller.signal.aborted) return;
             const failure = toActionError(cause);
             setError(failure);
-            // A 404 is a job the plugin has forgotten: polling cannot bring it back.
-            if (failure.status !== 404) setFailures((n) => n + 1);
+            if (failure.status >= 400 && failure.status < 500) {
+              // The plugin no longer knows the job, as after a restart: polling
+              // cannot bring it back, so it ends here and can be run again.
+              setJob({ ...job, state: "failed" });
+              props.onFinished();
+            } else {
+              setFailures((n) => n + 1);
+            }
           });
       }, POLL_MS);
       return () => {

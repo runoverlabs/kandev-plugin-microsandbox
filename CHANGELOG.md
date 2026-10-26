@@ -13,8 +13,8 @@
   store stays an error to retry, and never replaces the root.
 - A setup or upgrade job's view keeps following the job after a failed
   status poll, such as during a plugin restart, instead of staying on
-  "Running" until the page is reloaded; it stops only for a job the plugin
-  no longer knows.
+  "Running" until the page is reloaded. A job the plugin no longer knows
+  ends there, with the reason, and can be run again.
 - The "add a host that is already set up" form no longer pins a host key
   scanned for one SSH destination after the destination was edited.
 - A failure to read the plugin's SSH key, or the hosts' last check results,
