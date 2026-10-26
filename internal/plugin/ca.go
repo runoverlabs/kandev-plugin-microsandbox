@@ -73,9 +73,11 @@ func (a *caActions) create(ctx context.Context, body []byte) kandev.Response {
 	if err := c.Validate(); err != nil {
 		return kandev.Fail(http.StatusUnprocessableEntity, err.Error())
 	}
+	// A root that exists but cannot be loaded can still be replaced: that is
+	// the way out of a lost key.
 	if _, err := a.roots.Root(ctx); err == nil && !in.Replace {
 		return kandev.Fail(http.StatusConflict, "a root already exists; replacing it means reinstalling it on the Kandev server, so pass replace: true")
-	} else if err != nil && !errors.Is(err, pki.ErrNoRoot) {
+	} else if err != nil && !errors.Is(err, pki.ErrNoRoot) && !in.Replace {
 		return kandev.Internal(ActionCACreate, caWhat, err)
 	}
 	root, err := a.roots.Create(ctx, c)

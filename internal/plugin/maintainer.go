@@ -89,6 +89,9 @@ func (m *maintainer) maintainHosts(ctx context.Context) map[string]hostcheck.TLS
 		}
 		return nil
 	}
+	if len(registry.Hosts) == 0 {
+		return nil
+	}
 	client, err := m.connect(ctx)
 	if err != nil {
 		log.Printf("maintain: %v", err)

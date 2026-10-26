@@ -83,7 +83,7 @@ func (a *jobActions) setup(ctx context.Context, body []byte) kandev.Response {
 	}
 	publicKey, err := a.keys.PublicKey(ctx)
 	if err != nil {
-		return kandev.Internal(ActionHostsSetup, registryWhat, err)
+		return kandev.Internal(ActionHostsSetup, keyWhat, err)
 	}
 	plan.Input.PublicKey = publicKey
 	return a.started(a.manager.StartSetup(plan))
@@ -113,7 +113,7 @@ func (a *jobActions) upgrade(ctx context.Context, body []byte) kandev.Response {
 		return res
 	}
 	if _, err := a.connect(ctx); err != nil {
-		return kandev.Internal(ActionHostsUpgrade, registryWhat, err)
+		return kandev.Internal(ActionHostsUpgrade, keyWhat, err)
 	}
 	return a.started(a.manager.StartUpgrade(h))
 }

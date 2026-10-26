@@ -47,13 +47,9 @@ func (c *Checker) Heal(ctx context.Context, api Host, h hosts.Host, health msbct
 	if health.Serve.Mode != msbctl.ServeProxy {
 		return TLSOutcome{State: TLSNotProxy}
 	}
-	root, err := c.Roots.Root(ctx)
-	if errors.Is(err, pki.ErrNoRoot) {
-		return TLSOutcome{State: TLSNoRoot}
-	}
-	if err != nil {
-		log.Printf("tls %s: %v", h.Name, err)
-		return TLSOutcome{State: TLSFailed, Reason: msbctl.CodeUnavailable}
+	root, missing := c.loadRoot(ctx, h)
+	if root == nil {
+		return missing
 	}
 	name := HostName(h)
 	if !root.Permits(name) {
@@ -81,6 +77,20 @@ func (c *Checker) Heal(ctx context.Context, api Host, h hosts.Host, health msbct
 	return TLSOutcome{State: TLSRenewed, Reason: reason, NotAfter: installed.NotAfter}
 }
 
+// loadRoot returns the root to issue from, or, when there is none to use,
+// the outcome saying why: no root yet, or one that cannot be loaded.
+func (c *Checker) loadRoot(ctx context.Context, h hosts.Host) (*pki.Root, TLSOutcome) {
+	root, err := c.Roots.Root(ctx)
+	if errors.Is(err, pki.ErrNoRoot) {
+		return nil, TLSOutcome{State: TLSNoRoot}
+	}
+	if err != nil {
+		log.Printf("tls %s: %v", h.Name, err)
+		return nil, TLSOutcome{State: TLSFailed, Reason: msbctl.CodeUnavailable}
+	}
+	return root, TLSOutcome{}
+}
+
 // OutsideRoot is why root could never certify h's base URL, or "" when it
 // can, or when the URL names no host yet.
 func OutsideRoot(root *pki.Root, h hosts.Host) string {
@@ -97,13 +107,8 @@ func OutsideRoot(root *pki.Root, h hosts.Host) string {
 // root, so a write before the CA exists never loads, or generates, the
 // plugin's key.
 func (c *Checker) HealNow(ctx context.Context, connect func(context.Context) (Host, error), h hosts.Host) (outcome TLSOutcome, tried bool) {
-	_, err := c.Roots.Root(ctx)
-	if errors.Is(err, pki.ErrNoRoot) {
-		return TLSOutcome{}, false
-	}
-	if err != nil {
-		log.Printf("tls %s: %v", h.Name, err)
-		return TLSOutcome{State: TLSFailed, Reason: msbctl.CodeUnavailable}, true
+	if root, missing := c.loadRoot(ctx, h); root == nil {
+		return missing, missing.State != TLSNoRoot
 	}
 	api, err := connect(ctx)
 	if err != nil {

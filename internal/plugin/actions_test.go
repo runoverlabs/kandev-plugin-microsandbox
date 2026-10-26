@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kandev-plugin-microsandbox/internal/kandev/kandevtest"
 	"kandev-plugin-microsandbox/internal/profile"
 	"kandev-plugin-microsandbox/internal/sandbox"
 	"kandev-plugin-microsandbox/internal/sshx"
@@ -70,6 +71,33 @@ func TestAddWithoutARootLeavesTheKeyAlone(t *testing.T) {
 	require.Equal(t, 201, status, body)
 	assert.NotContains(t, body, "tls")
 	assert.Empty(t, host.Secret(sshKeySecret))
+}
+
+// Nor does a maintainer pass with nothing to maintain.
+func TestMaintainingNoHostsLeavesTheKeyAlone(t *testing.T) {
+	host := newFakeHost()
+	r := newRuntime(t, host)
+	assert.Empty(t, r.maintainHosts(t.Context()))
+	assert.Empty(t, host.Secret(sshKeySecret))
+}
+
+// secretlessHost is a Kandev whose secret store is down.
+type secretlessHost struct{ *kandevtest.Host }
+
+func (secretlessHost) GetSecret(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("secret store down")
+}
+
+func (secretlessHost) SetSecret(context.Context, string, string) error {
+	return errors.New("secret store down")
+}
+
+// A key that cannot be read is not blamed on the registry.
+func TestAnUnreadableKeyIsNamed(t *testing.T) {
+	r := newRuntime(t, secretlessHost{newFakeHost()})
+	status, body := call(t, r, ActionHostsList, nil)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, "the plugin's SSH key could not be read or saved", body["error"])
 }
 
 func TestAddRejectsBadInput(t *testing.T) {

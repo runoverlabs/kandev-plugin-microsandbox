@@ -24,7 +24,7 @@ workspace as the action scope).
 | `hosts.drain` | `{"name": "...", "draining": true}` | A draining host gets no new sandboxes but keeps serving its existing ones. |
 | `hosts.remove` | `{"name": "...", "force": false}` | Asks the host for its kandev sandboxes and refuses (409) while it has any. If the host cannot be reached, it refuses (502) unless `force` is set. |
 | `ca.get` | `{}` | The plugin's root certificate (PEM, SHA-256, constraints, expiry), whether this Kandev server trusts it yet, and how to install it. `exists: false` before `ca.create`. |
-| `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. |
+| `ca.create` | `{"dns_suffixes": ["tailnet.ts.net"], "cidrs": [], "replace": false}` | Generates the root, name-constrained to those suffixes and ranges. Refuses (409) to replace an existing root unless `replace` is set; hosts are then re-issued automatically. `replace` also replaces a root that cannot be loaded. |
 | `hosts.test` | `{"name": "..."}` | Runs `msbctl kandev health` and returns `ok`, a `problem` code with a `hint`, the health report, a `tls` outcome for proxy hosts, and a `warning` when the host's own `base_url` differs from the registered one. The result becomes the host's `status`. |
 | `hosts.setup` | below | Sets up a bare machine over an admin login and registers it: [Setting up a new machine](#setting-up-a-new-machine). Returns 202 with a job. |
 | `hosts.upgrade` | `{"name": "..."}` | Updates the host's msb-manager to the release `hosts.setup` installs (0.7.0), through the plugin's own key, makes sure the TLS proxy runs that release (restarting it if the update did not), then runs Test. On a current host it only restarts a proxy left on an older release. Needs msb-manager 0.6.0 or newer on the host already; older hosts take `hosts.setup` once. Returns 202 with a job. |
@@ -68,7 +68,7 @@ uptime.
 
 | Item | States | Checks |
 | --- | --- | --- |
-| `root` | `ok`, `missing`, `untrusted` | The plugin's root exists and the Kandev server's system roots trust it. |
+| `root` | `ok`, `missing`, `untrusted`, `failing` | The plugin's root exists and the Kandev server's system roots trust it. `failing` is a root that exists but cannot be loaded, such as one whose key is gone from the secret store: replace it. |
 | `api_url` | `ok`, `invalid`, `unknown` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`, which every plugin launch needs, against Kandev's own rules (below). Kandev passes its environment to the plugin, so the plugin reads it there. A value set in Kandev's config file instead is invisible to the plugin until a launch carries it, so before the first launch the state is `unknown`, and afterwards the URL the last launch carried counts. |
 | `hosts` | `ok`, `missing`, `unchecked`, `failing` | At least one registered host passes its last check; failing hosts are named with their problem. |
 

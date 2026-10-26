@@ -26,6 +26,10 @@ const (
 
 const registryWhat = "the host registry"
 
+// keyWhat is what failed when the plugin's SSH key, and so every host, is
+// out of reach.
+const keyWhat = "the plugin's SSH key"
+
 // hostActions serve the Sandbox Hosts page. Every action is admin-only in
 // the manifest: the registry decides where every workspace's sandboxes run.
 type hostActions struct {
@@ -72,7 +76,7 @@ func (a *hostActions) list(ctx context.Context, body []byte) kandev.Response {
 	}
 	publicKey, err := a.keys.PublicKey(ctx)
 	if err != nil {
-		return kandev.Internal(ActionHostsList, registryWhat, err)
+		return kandev.Internal(ActionHostsList, keyWhat, err)
 	}
 	registry, err := a.registry.Load(ctx)
 	if err != nil {
@@ -218,7 +222,7 @@ func (a *hostActions) remove(ctx context.Context, body []byte) kandev.Response {
 func (a *hostActions) refuseOccupied(ctx context.Context, h hosts.Host, force bool) (kandev.Response, bool) {
 	client, err := a.connect(ctx)
 	if err != nil {
-		return kandev.Internal(ActionHostsRemove, registryWhat, err), true
+		return kandev.Internal(ActionHostsRemove, keyWhat, err), true
 	}
 	sandboxes, err := client.List(ctx, h)
 	switch {
@@ -246,7 +250,7 @@ func (a *hostActions) test(ctx context.Context, body []byte) kandev.Response {
 	}
 	result, err := a.tester.Test(ctx, h)
 	if err != nil {
-		return kandev.Internal(ActionHostsTest, registryWhat, err)
+		return kandev.Internal(ActionHostsTest, keyWhat, err)
 	}
 	return kandev.OK(result)
 }

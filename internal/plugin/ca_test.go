@@ -374,6 +374,15 @@ func TestBrokenRootIsReportedNotSkipped(t *testing.T) {
 	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
 
 	status, body = call(t, r, ActionSetupStatus, nil)
-	assert.Equal(t, 500, status)
-	assert.Equal(t, "the plugin's settings could not be read or saved", body["error"])
+	require.Equal(t, 200, status, body)
+	root := body["items"].([]any)[0].(map[string]any)
+	assert.Equal(t, "root", root["key"])
+	assert.Equal(t, "failing", root["state"])
+	assert.Len(t, body["items"], 3, "the other items are still reported")
+
+	// Replacing it is the way out.
+	assert.Equal(t, 500, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
+	require.Equal(t, 201, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}, "replace": true})))
+	_, body = call(t, r, ActionSetupStatus, nil)
+	assert.NotEqual(t, "failing", body["items"].([]any)[0].(map[string]any)["state"])
 }
