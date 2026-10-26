@@ -27,12 +27,12 @@ import (
 
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/sshx"
+	"kandev-plugin-microsandbox/internal/remote"
 )
 
 // Shell runs one command line on the machine with stdin, as the admin login.
 type Shell interface {
-	Exec(ctx context.Context, command string, stdin []byte) (sshx.Output, error)
+	Exec(ctx context.Context, command string, stdin []byte) (remote.Output, error)
 }
 
 // accountPattern is a portable account name (useradd's default rule).
@@ -212,7 +212,7 @@ func (r *run) set(key, state, detail string, commands ...string) {
 }
 
 // failed records a failed command with the tail of its output.
-func (r *run) failed(key, detail string, out sshx.Output, err error) {
+func (r *run) failed(key, detail string, out remote.Output, err error) {
 	if err != nil {
 		detail += " (the command did not complete)"
 	}
@@ -396,7 +396,7 @@ func (r *run) packages(ctx context.Context) bool {
 
 // root runs script as root: directly when logged in as root, else through
 // passwordless sudo.
-func (r *run) root(ctx context.Context, script string) (sshx.Output, error) {
+func (r *run) root(ctx context.Context, script string) (remote.Output, error) {
 	command := "sudo -n sh -s"
 	if r.facts.get("uid") == "0" {
 		command = "sh -s"
@@ -413,20 +413,20 @@ if [ -S "$XDG_RUNTIME_DIR/bus" ]; then export DBUS_SESSION_BUS_ADDRESS="unix:pat
 `
 
 // asAccount runs script as the msb-manager account, in its home.
-func (r *run) asAccount(ctx context.Context, script string) (sshx.Output, error) {
+func (r *run) asAccount(ctx context.Context, script string) (remote.Output, error) {
 	command := "sh -s"
 	switch {
 	case r.account == r.facts.get("user"):
 	case r.facts.get("uid") == "0":
-		command = "runuser -l " + sshx.Quote(r.account) + " -c 'sh -s'"
+		command = "runuser -l " + remote.Quote(r.account) + " -c 'sh -s'"
 	default:
-		command = "sudo -n -iu " + sshx.Quote(r.account) + " sh -s"
+		command = "sudo -n -iu " + remote.Quote(r.account) + " sh -s"
 	}
 	return r.sh.Exec(ctx, command, []byte(accountPreamble+"cd\n"+script))
 }
 
 func (r *run) prepareAccount(ctx context.Context) bool {
-	u := sshx.Quote(r.account)
+	u := remote.Quote(r.account)
 	if r.facts.privileged() {
 		script := fmt.Sprintf(`set -eu
 u=%[1]s
@@ -602,7 +602,7 @@ func (r *run) firewall(ctx context.Context) {
 		family = "ipv6"
 	}
 	rich := fmt.Sprintf(`rule family="%s" source address="%s" port port="%s" protocol="tcp" accept`, family, addr, ports)
-	firewalld := fmt.Sprintf("firewall-cmd --permanent --query-rich-rule=%[1]s >/dev/null || { firewall-cmd --permanent --add-rich-rule=%[1]s && firewall-cmd --reload >/dev/null && echo firewalld; }", sshx.Quote(rich))
+	firewalld := fmt.Sprintf("firewall-cmd --permanent --query-rich-rule=%[1]s >/dev/null || { firewall-cmd --permanent --add-rich-rule=%[1]s && firewall-cmd --reload >/dev/null && echo firewalld; }", remote.Quote(rich))
 	ufw := fmt.Sprintf("ufw allow proto tcp from %s to any port %s", addr, strings.Replace(ports, "-", ":", 1))
 	switch {
 	case r.facts.get("firewalld") == "active" && !r.facts.privileged():
@@ -722,7 +722,7 @@ func (a accountRunner) Run(ctx context.Context, _ hosts.Host, args []string, std
 	if len(extra) > 0 {
 		return nil, 0, fmt.Errorf("host setup runs msbctl without stdin")
 	}
-	out, err := a.r.asAccount(ctx, sshx.Join(args)+" </dev/null\n")
+	out, err := a.r.asAccount(ctx, remote.Join(args)+" </dev/null\n")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -733,7 +733,7 @@ func (a accountRunner) Run(ctx context.Context, _ hosts.Host, args []string, std
 const maxOutputTail = 2000
 
 // tail is the end of a failed command's stderr, then stdout, printable only.
-func tail(out sshx.Output) string {
+func tail(out remote.Output) string {
 	text := bytes.TrimSpace(out.Stderr)
 	if len(text) == 0 {
 		text = bytes.TrimSpace(out.Stdout)

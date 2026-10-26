@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"kandev-plugin-microsandbox/internal/remote"
+
 	"golang.org/x/crypto/ssh"
 )
 
@@ -18,10 +20,6 @@ type AdminAuth struct {
 	Passphrase    string
 	Password      string
 }
-
-// ErrAdminAuth means the login could not be used: an unreadable key, or a
-// key that needs a passphrase that was not given or does not fit.
-var ErrAdminAuth = errors.New("the admin login is unusable")
 
 func (a AdminAuth) methods() ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
@@ -36,9 +34,9 @@ func (a AdminAuth) methods() ([]ssh.AuthMethod, error) {
 		if err != nil {
 			var missing *ssh.PassphraseMissingError
 			if errors.As(err, &missing) {
-				return nil, fmt.Errorf("%w: the key needs its passphrase", ErrAdminAuth)
+				return nil, fmt.Errorf("%w: the key needs its passphrase", remote.ErrAdminAuth)
 			}
-			return nil, fmt.Errorf("%w: the private key could not be read", ErrAdminAuth)
+			return nil, fmt.Errorf("%w: the private key could not be read", remote.ErrAdminAuth)
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
@@ -54,7 +52,7 @@ func (a AdminAuth) methods() ([]ssh.AuthMethod, error) {
 			}))
 	}
 	if len(methods) == 0 {
-		return nil, fmt.Errorf("%w: give a private key or a password", ErrAdminAuth)
+		return nil, fmt.Errorf("%w: give a private key or a password", remote.ErrAdminAuth)
 	}
 	return methods, nil
 }
@@ -62,15 +60,6 @@ func (a AdminAuth) methods() ([]ssh.AuthMethod, error) {
 // Admin is one SSH connection with an operator's login, for host setup.
 type Admin struct {
 	client *ssh.Client
-}
-
-// Output is what one setup command printed. Unlike msbctl's kandev answers,
-// stderr is kept: it is the operator's own machine, and an installer's error
-// is the only way to say why a step failed.
-type Output struct {
-	Stdout []byte
-	Stderr []byte
-	Exit   int
 }
 
 // MaxAdminOutput bounds each stream of one setup command.
@@ -92,10 +81,10 @@ func DialAdmin(ctx context.Context, dialer Dialer, dest, hostKey string, auth Ad
 
 // Exec runs command with stdin and returns its output. A non-nil error means
 // it did not run to completion; a non-zero exit is in Output.
-func (a *Admin) Exec(ctx context.Context, command string, stdin []byte) (Output, error) {
+func (a *Admin) Exec(ctx context.Context, command string, stdin []byte) (remote.Output, error) {
 	session, err := openSession(ctx, a.client)
 	if err != nil {
-		return Output{}, err
+		return remote.Output{}, err
 	}
 	defer session.Close()
 	stdout := &cappedBuffer{limit: MaxAdminOutput}
@@ -103,7 +92,7 @@ func (a *Admin) Exec(ctx context.Context, command string, stdin []byte) (Output,
 	session.Stdout, session.Stderr = stdout, stderr
 	session.Stdin = bytes.NewReader(stdin)
 	if err := session.Start(command); err != nil {
-		return Output{}, fmt.Errorf("start command: %w", err)
+		return remote.Output{}, fmt.Errorf("start command: %w", err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- session.Wait() }()
@@ -113,16 +102,16 @@ func (a *Admin) Exec(ctx context.Context, command string, stdin []byte) (Output,
 		_ = session.Signal(ssh.SIGTERM)
 		_ = session.Close()
 		<-done
-		return Output{}, ctx.Err()
+		return remote.Output{}, ctx.Err()
 	}
-	out := Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	out := remote.Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	var exit *ssh.ExitError
 	switch {
 	case err == nil:
 	case errors.As(err, &exit):
 		out.Exit = exit.ExitStatus()
 	default:
-		return Output{}, fmt.Errorf("command did not complete: %w", err)
+		return remote.Output{}, fmt.Errorf("command did not complete: %w", err)
 	}
 	return out, nil
 }

@@ -14,6 +14,7 @@ import (
 
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/hostsetup"
+	"kandev-plugin-microsandbox/internal/remote"
 	"kandev-plugin-microsandbox/internal/sshx"
 )
 
@@ -335,11 +336,11 @@ func (r *Runtime) runSetup(ctx context.Context, id, adminDest string, planned ho
 
 func adminDialFailure(err error) string {
 	switch {
-	case errors.Is(err, sshx.ErrAdminAuth):
-		return strings.TrimPrefix(err.Error(), sshx.ErrAdminAuth.Error()+": ") + "."
-	case errors.Is(err, sshx.ErrHostKeyMismatch):
+	case errors.Is(err, remote.ErrAdminAuth):
+		return strings.TrimPrefix(err.Error(), remote.ErrAdminAuth.Error()+": ") + "."
+	case errors.Is(err, remote.ErrHostKeyMismatch):
 		return "The machine presented a different SSH host key than the one confirmed. Verify it before trying again."
-	case errors.Is(err, sshx.ErrNotAuthorized):
+	case errors.Is(err, remote.ErrNotAuthorized):
 		return "The machine refused the admin login."
 	default:
 		return "Could not reach the machine's SSH server."

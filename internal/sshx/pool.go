@@ -1,3 +1,7 @@
+// Package sshx is the SSH transport to sandbox hosts: the plugin's key, host
+// key pinning, one shared connection per host, and the operator's one-off
+// admin login. It knows nothing about msbctl verbs; quoting and the error
+// kinds it reports are internal/remote's.
 package sshx
 
 import (
@@ -15,6 +19,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"kandev-plugin-microsandbox/internal/hosts"
+	"kandev-plugin-microsandbox/internal/remote"
 )
 
 const (
@@ -31,11 +36,6 @@ const (
 )
 
 var (
-	// ErrHostKeyMismatch means the host presented a key other than the
-	// pinned one. It is never retried and never re-pinned automatically.
-	ErrHostKeyMismatch = errors.New("host key does not match the pinned key")
-	// ErrNotAuthorized means the host refused the plugin's key.
-	ErrNotAuthorized = errors.New("host refused the plugin's ssh key")
 	// ErrOutputTooLarge means a command printed more than MaxStdout.
 	ErrOutputTooLarge = errors.New("command output exceeds the size limit")
 	// ErrClosed is returned after Close.
@@ -74,7 +74,7 @@ func NewPool(signer ssh.Signer, dialer Dialer) *Pool {
 // connection only when a cached connection cannot open a session, which is
 // before anything ran on the host.
 func (p *Pool) Run(ctx context.Context, h hosts.Host, args []string, stdin io.Reader) ([]byte, int, error) {
-	command := Join(args)
+	command := remote.Join(args)
 	for attempt := 0; ; attempt++ {
 		client, fresh, err := p.client(ctx, h)
 		if err != nil {
@@ -197,7 +197,7 @@ func dialPinned(ctx context.Context, dialer Dialer, dest, hostKey string, auth [
 		HostKeyAlgorithms: hostKeyAlgorithms(pinned),
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if !bytes.Equal(key.Marshal(), pinned.Marshal()) {
-				return ErrHostKeyMismatch
+				return remote.ErrHostKeyMismatch
 			}
 			return nil
 		},
@@ -213,10 +213,10 @@ func dialPinned(ctx context.Context, dialer Dialer, dest, hostKey string, auth [
 
 func classifyHandshake(ctx context.Context, address string, err error) error {
 	switch {
-	case errors.Is(err, ErrHostKeyMismatch):
-		return fmt.Errorf("%s: %w", address, ErrHostKeyMismatch)
+	case errors.Is(err, remote.ErrHostKeyMismatch):
+		return fmt.Errorf("%s: %w", address, remote.ErrHostKeyMismatch)
 	case strings.Contains(err.Error(), "unable to authenticate"):
-		return fmt.Errorf("%s: %w", address, ErrNotAuthorized)
+		return fmt.Errorf("%s: %w", address, remote.ErrNotAuthorized)
 	case ctx.Err() != nil:
 		return fmt.Errorf("ssh handshake with %s: %w", address, ctx.Err())
 	default:

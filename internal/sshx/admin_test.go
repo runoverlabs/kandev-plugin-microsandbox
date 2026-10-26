@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
+	"kandev-plugin-microsandbox/internal/remote"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
 
@@ -58,15 +59,15 @@ func TestAdminAuthMethods(t *testing.T) {
 	}
 	assert.NoError(t, dial(AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"}))
 	assert.NoError(t, dial(AdminAuth{Password: "pw-1"}))
-	assert.ErrorIs(t, dial(AdminAuth{Password: "nope"}), ErrNotAuthorized)
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM}), ErrAdminAuth, "the passphrase is missing")
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "wrong"}), ErrAdminAuth)
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: "not a key"}), ErrAdminAuth)
-	assert.ErrorIs(t, dial(AdminAuth{}), ErrAdminAuth)
+	assert.ErrorIs(t, dial(AdminAuth{Password: "nope"}), remote.ErrNotAuthorized)
+	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM}), remote.ErrAdminAuth, "the passphrase is missing")
+	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "wrong"}), remote.ErrAdminAuth)
+	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: "not a key"}), remote.ErrAdminAuth)
+	assert.ErrorIs(t, dial(AdminAuth{}), remote.ErrAdminAuth)
 
 	other := sshtest.Start(t, public, func(string, []byte) sshtest.Reply { return sshtest.Reply{} })
 	_, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("root"), other.HostKey, AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"})
-	assert.ErrorIs(t, err, ErrHostKeyMismatch, "the pin is checked as for the plugin's own key")
+	assert.ErrorIs(t, err, remote.ErrHostKeyMismatch, "the pin is checked as for the plugin's own key")
 }
 
 // The login's secrets never appear in an error.

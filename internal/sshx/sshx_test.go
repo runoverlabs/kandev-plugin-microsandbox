@@ -15,34 +15,10 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"kandev-plugin-microsandbox/internal/hosts"
+	"kandev-plugin-microsandbox/internal/remote"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
-
-func TestQuoteMatchesShlexQuote(t *testing.T) {
-	// Expected values are Python 3's shlex.join output for the same argv.
-	got := sshx.Join([]string{"msbctl", "kandev", "provision", "k-env 1", "it's", "", "a=b,c:d/e@f%g+h", "é", "$HOME;rm"})
-	assert.Equal(t, `msbctl kandev provision 'k-env 1' 'it'"'"'s' '' a=b,c:d/e@f%g+h 'é' '$HOME;rm'`, got)
-}
-
-// The generic verbs' argv as `host serve --kandev` admits them; a name from
-// the record is a plain token, so nothing is quoted.
-func TestGenericVerbCommandLines(t *testing.T) {
-	for argv, want := range map[string]string{
-		"ls":    "msbctl ls --json",
-		"show":  "msbctl show k-6f1c2b9e --json",
-		"stop":  "msbctl stop k-6f1c2b9e --json",
-		"purge": "msbctl purge k-6f1c2b9e -y --json",
-	} {
-		args := map[string][]string{
-			"ls":    {"msbctl", "ls", "--json"},
-			"show":  {"msbctl", "show", "k-6f1c2b9e", "--json"},
-			"stop":  {"msbctl", "stop", "k-6f1c2b9e", "--json"},
-			"purge": {"msbctl", "purge", "k-6f1c2b9e", "-y", "--json"},
-		}[argv]
-		assert.Equal(t, want, sshx.Join(args), argv)
-	}
-}
 
 func TestGenerateKeyRoundTrips(t *testing.T) {
 	private, authorized, err := sshx.GenerateKey()
@@ -139,7 +115,7 @@ func TestRunRefusesAWrongHostKey(t *testing.T) {
 	other := newFixture(t, echo)
 	f.host.HostKey = other.server.HostKey
 	_, _, err := f.pool.Run(context.Background(), f.host, []string{"msbctl"}, nil)
-	assert.ErrorIs(t, err, sshx.ErrHostKeyMismatch)
+	assert.ErrorIs(t, err, remote.ErrHostKeyMismatch)
 	assert.Empty(t, f.server.Execs())
 }
 
@@ -152,7 +128,7 @@ func TestRunReportsAnUnauthorizedKey(t *testing.T) {
 	pool := sshx.NewPool(stranger, &net.Dialer{})
 	defer pool.Close()
 	_, _, err = pool.Run(context.Background(), f.host, []string{"msbctl"}, nil)
-	assert.ErrorIs(t, err, sshx.ErrNotAuthorized)
+	assert.ErrorIs(t, err, remote.ErrNotAuthorized)
 }
 
 func TestRunHonorsCancellation(t *testing.T) {

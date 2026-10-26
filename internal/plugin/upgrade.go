@@ -10,7 +10,7 @@ import (
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/hostsetup"
 	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/sshx"
+	"kandev-plugin-microsandbox/internal/remote"
 )
 
 // ActionHostsUpgrade brings a host's msb-manager to the release host setup
@@ -185,7 +185,7 @@ func upgradeFailure(err error) string {
 		return "The host runs msb-manager from a git checkout: update it there with git pull."
 	case msbctl.CodeOf(err) == msbctl.CodeDenied:
 		return "The host refused: Kandev is turned off in its [kandev] section, or the release would be older than the one it runs."
-	case errors.Is(err, msbctl.ErrUnreachable), errors.Is(err, sshx.ErrNotAuthorized), errors.Is(err, sshx.ErrHostKeyMismatch):
+	case errors.Is(err, msbctl.ErrUnreachable), errors.Is(err, remote.ErrNotAuthorized), errors.Is(err, remote.ErrHostKeyMismatch):
 		return "The host could not be reached with the plugin's key; run Test for why."
 	default:
 		return "The update failed on the host; its installer's output is on the host only (run `msbctl self-update` there to see it)."

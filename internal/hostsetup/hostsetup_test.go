@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/sshx"
+	"kandev-plugin-microsandbox/internal/remote"
 )
 
 const pluginKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPluginKeyForTests kandev-plugin"
@@ -50,12 +50,12 @@ func ubuntu() *machine {
 
 func (m *machine) has(c string) bool { return !m.missing[c] }
 
-func (m *machine) Exec(_ context.Context, command string, stdin []byte) (sshx.Output, error) {
+func (m *machine) Exec(_ context.Context, command string, stdin []byte) (remote.Output, error) {
 	script := string(stdin)
 	m.execs = append(m.execs, exec{command, script})
-	ok := func(stdout string) (sshx.Output, error) { return sshx.Output{Stdout: []byte(stdout)}, nil }
-	exit := func(code int, stderr string) (sshx.Output, error) {
-		return sshx.Output{Stderr: []byte(stderr), Exit: code}, nil
+	ok := func(stdout string) (remote.Output, error) { return remote.Output{Stdout: []byte(stdout)}, nil }
+	exit := func(code int, stderr string) (remote.Output, error) {
+		return remote.Output{Stderr: []byte(stderr), Exit: code}, nil
 	}
 	switch {
 	case script == probeScript:

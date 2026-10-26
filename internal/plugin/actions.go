@@ -16,6 +16,7 @@ import (
 	"kandev-plugin-microsandbox/internal/egress"
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
+	"kandev-plugin-microsandbox/internal/remote"
 	"kandev-plugin-microsandbox/internal/sshx"
 )
 
@@ -180,7 +181,7 @@ func (r *Runtime) actionList(ctx context.Context, body []byte) response {
 
 // authorizeCommand is what the operator runs on each sandbox host.
 func authorizeCommand(publicKey string) string {
-	return "msbctl host authorize " + sshx.Quote(publicKey) + " --kandev"
+	return "msbctl host authorize " + remote.Quote(publicKey) + " --kandev"
 }
 
 // actionScan fetches the key a host presents, for the operator to confirm
@@ -494,9 +495,9 @@ func allowExtraLine(entries []string) string {
 
 func diagnose(health msbctl.Health, err error, publicKey string) testResult {
 	switch {
-	case errors.Is(err, sshx.ErrHostKeyMismatch):
+	case errors.Is(err, remote.ErrHostKeyMismatch):
 		return testResult{Problem: "host_key_mismatch", Hint: "The host presented a different SSH host key than the pinned one. Verify it on the host before updating the pin."}
-	case errors.Is(err, sshx.ErrNotAuthorized):
+	case errors.Is(err, remote.ErrNotAuthorized):
 		return testResult{Problem: "not_authorized", Hint: "Authorize the plugin's key on the host: " + authorizeCommand(publicKey)}
 	case errors.Is(err, msbctl.ErrUnreachable):
 		return testResult{Problem: "unreachable", Hint: "The host's SSH server did not answer."}
