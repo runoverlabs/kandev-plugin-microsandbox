@@ -12,22 +12,31 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// adminSigner reads the login's private key, with its passphrase if given.
+func adminSigner(a remote.AdminAuth) (ssh.Signer, error) {
+	var signer ssh.Signer
+	var err error
+	if a.Passphrase != "" {
+		signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(a.PrivateKeyPEM), []byte(a.Passphrase))
+	} else {
+		signer, err = ssh.ParsePrivateKey([]byte(a.PrivateKeyPEM))
+	}
+	var missing *ssh.PassphraseMissingError
+	switch {
+	case errors.As(err, &missing):
+		return nil, fmt.Errorf("%w: the key needs its passphrase", remote.ErrAdminAuth)
+	case err != nil:
+		return nil, fmt.Errorf("%w: the private key could not be read", remote.ErrAdminAuth)
+	}
+	return signer, nil
+}
+
 func adminMethods(a remote.AdminAuth) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 	if strings.TrimSpace(a.PrivateKeyPEM) != "" {
-		var signer ssh.Signer
-		var err error
-		if a.Passphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(a.PrivateKeyPEM), []byte(a.Passphrase))
-		} else {
-			signer, err = ssh.ParsePrivateKey([]byte(a.PrivateKeyPEM))
-		}
+		signer, err := adminSigner(a)
 		if err != nil {
-			var missing *ssh.PassphraseMissingError
-			if errors.As(err, &missing) {
-				return nil, fmt.Errorf("%w: the key needs its passphrase", remote.ErrAdminAuth)
-			}
-			return nil, fmt.Errorf("%w: the private key could not be read", remote.ErrAdminAuth)
+			return nil, err
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
@@ -92,7 +101,7 @@ func (a *Admin) Exec(ctx context.Context, command string, stdin []byte) (remote.
 	case <-ctx.Done():
 		_ = session.Signal(ssh.SIGTERM)
 		_ = session.Close()
-		<-done
+		<-done //nolint:errcheck // the command's own outcome is moot once cancelled
 		return remote.Output{}, ctx.Err()
 	}
 	out := remote.Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}

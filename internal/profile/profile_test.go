@@ -290,11 +290,3 @@ func TestSecretNameAndHosts(t *testing.T) {
 func TestMessageID(t *testing.T) {
 	assert.Equal(t, "profile.cpus.out_of_range", FieldError{FieldCPUs, CodeOutOfRange}.MessageID())
 }
-
-func flatten(m map[string]string) []string {
-	out := make([]string, 0, len(m)*2)
-	for k, v := range m {
-		out = append(out, k, v)
-	}
-	return out
-}

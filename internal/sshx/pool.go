@@ -282,7 +282,7 @@ func runSession(ctx context.Context, session *ssh.Session, command string, stdin
 	case <-ctx.Done():
 		_ = session.Signal(ssh.SIGTERM)
 		_ = session.Close()
-		<-done
+		<-done //nolint:errcheck // the command's own outcome is moot once cancelled
 		return nil, 0, ctx.Err()
 	}
 	if stdout.overflow {

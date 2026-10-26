@@ -151,7 +151,7 @@ func TestProvisionLogsNoSecret(t *testing.T) {
 	f.api.failCheck = true // force the failure paths that log
 	f.provision(t, "env-1", "op-1", fullProfile())
 	bad := fullProfile()
-	f.r.ProvisionExecutorEnvironment(t.Context(), &pluginsdk.ProvisionExecutorEnvironmentRequest{
+	_, _ = f.r.ProvisionExecutorEnvironment(t.Context(), &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context: requestContext("env-2", "op-2"), Profile: bad, BootstrapJson: `{"nonce":"` + plantedNonce + `","api_url":"ftp://x"}`,
 	})
 	for _, secret := range []string{plantedNonce, plantedSecret, plantedRegPW} {

@@ -201,82 +201,117 @@ type intField struct {
 // Placement is checked for shape only; whether it resolves to a host is the
 // registry's question.
 func Parse(config, secrets map[string]string) (Spec, []FieldError) {
-	var spec Spec
-	var errs []FieldError
-	add := func(field, code string) { errs = append(errs, FieldError{Field: field, Code: code}) }
+	p := &parser{config: config, secrets: secrets}
+	p.placement()
+	p.image()
+	p.sizes()
+	p.egress()
+	p.env()
+	p.registry()
+	p.names()
+	return p.spec, p.errs
+}
 
-	if placement, code := parsePlacement(value(config, FieldPlacement)); code != "" {
-		add(FieldPlacement, code)
+// parser is one Parse, field group by field group, in the order the
+// problems are reported.
+type parser struct {
+	config, secrets map[string]string
+	spec            Spec
+	errs            []FieldError
+}
+
+func (p *parser) add(field, code string) {
+	p.errs = append(p.errs, FieldError{Field: field, Code: code})
+}
+
+func (p *parser) value(field string) string { return value(p.config, field) }
+
+func (p *parser) placement() {
+	if placement, code := parsePlacement(p.value(FieldPlacement)); code != "" {
+		p.add(FieldPlacement, code)
 	} else {
-		spec.Placement = placement
+		p.spec.Placement = placement
 	}
+}
 
-	switch image := value(config, FieldImage); {
+func (p *parser) image() {
+	switch image := p.value(FieldImage); {
 	case image == "":
-		add(FieldImage, CodeRequired)
+		p.add(FieldImage, CodeRequired)
 	case !imagePattern.MatchString(image):
-		add(FieldImage, CodeInvalid)
+		p.add(FieldImage, CodeInvalid)
 	default:
-		spec.Image = image
+		p.spec.Image = image
 	}
+}
 
+func (p *parser) sizes() {
 	for _, f := range []intField{
-		{FieldCPUs, true, 1, 16, 0, &spec.CPUs},
-		{FieldMemoryMiB, true, 512, 65536, 0, &spec.MemoryMiB},
-		{FieldDiskGiB, false, 5, 500, DefaultDiskGiB, &spec.DiskGiB},
-		{FieldWorkspaceGiB, false, 1, 500, DefaultWorkspaceGiB, &spec.WorkspaceGiB},
-		{FieldMaxLifetimeHours, true, 1, MaxLifetimeHours, 0, &spec.MaxLifetimeHours},
-		{FieldRetainHours, false, 0, MaxLifetimeHours, DefaultRetainHours, &spec.RetainHours},
+		{FieldCPUs, true, 1, 16, 0, &p.spec.CPUs},
+		{FieldMemoryMiB, true, 512, 65536, 0, &p.spec.MemoryMiB},
+		{FieldDiskGiB, false, 5, 500, DefaultDiskGiB, &p.spec.DiskGiB},
+		{FieldWorkspaceGiB, false, 1, 500, DefaultWorkspaceGiB, &p.spec.WorkspaceGiB},
+		{FieldMaxLifetimeHours, true, 1, MaxLifetimeHours, 0, &p.spec.MaxLifetimeHours},
+		{FieldRetainHours, false, 0, MaxLifetimeHours, DefaultRetainHours, &p.spec.RetainHours},
 	} {
-		if code := parseInt(config, f); code != "" {
-			add(f.name, code)
+		if code := parseInt(p.config, f); code != "" {
+			p.add(f.name, code)
 		}
 	}
+}
 
-	if entries, err := egress.ParseList(value(config, FieldEgressAllow)); err == nil && egress.CheckList(entries) == nil {
-		spec.EgressAllow = entries
+func (p *parser) egress() {
+	if entries, err := egress.ParseList(p.value(FieldEgressAllow)); err == nil && egress.CheckList(entries) == nil {
+		p.spec.EgressAllow = entries
 	} else {
-		add(FieldEgressAllow, CodeInvalid)
+		p.add(FieldEgressAllow, CodeInvalid)
 	}
-	if groups, ok := parseNames(value(config, FieldEgressGroups)); ok {
-		spec.EgressGroups = groups
+	if groups, ok := parseNames(p.value(FieldEgressGroups)); ok {
+		p.spec.EgressGroups = groups
 	} else {
-		add(FieldEgressGroups, CodeInvalid)
+		p.add(FieldEgressGroups, CodeInvalid)
 	}
+}
 
-	env, envErrs := parseEnv(value(config, FieldEnv))
-	spec.Env = env
-	errs = append(errs, envErrs...)
+func (p *parser) env() {
+	env, errs := parseEnv(p.value(FieldEnv))
+	p.spec.Env = env
+	p.errs = append(p.errs, errs...)
+}
 
-	spec.RegistryUsername = value(config, FieldRegistryUsername)
-	spec.RegistryPassword = secrets[FieldRegistryPassword]
-	if (spec.RegistryUsername == "") != (spec.RegistryPassword == "") {
-		if spec.RegistryUsername == "" {
-			add(FieldRegistryUsername, CodeUnpaired)
-		} else {
-			add(FieldRegistryPassword, CodeUnpaired)
-		}
+// registry reads the image registry login: both halves or neither, and only
+// for an image that names its registry.
+func (p *parser) registry() {
+	p.spec.RegistryUsername = p.value(FieldRegistryUsername)
+	p.spec.RegistryPassword = p.secrets[FieldRegistryPassword]
+	switch {
+	case p.spec.RegistryUsername == "" && p.spec.RegistryPassword != "":
+		p.add(FieldRegistryUsername, CodeUnpaired)
+	case p.spec.RegistryUsername != "" && p.spec.RegistryPassword == "":
+		p.add(FieldRegistryPassword, CodeUnpaired)
 	}
-	if spec.RegistryUsername != "" && spec.Image != "" && !namesRegistry(spec.Image) {
-		add(FieldImage, CodeNoRegistry)
+	if p.spec.RegistryUsername != "" && p.spec.Image != "" && !namesRegistry(p.spec.Image) {
+		p.add(FieldImage, CodeNoRegistry)
 	}
+}
 
-	taken := make(map[string]bool, len(env))
-	for _, item := range env {
+// names reads the secrets and private names a profile asks for.
+func (p *parser) names() {
+	taken := make(map[string]bool, len(p.spec.Env))
+	for _, item := range p.spec.Env {
 		taken[strings.ToUpper(item.Name)] = true
 	}
-	names, code := parseSecretNames(value(config, FieldSecrets), taken)
+	names, code := parseSecretNames(p.value(FieldSecrets), taken)
 	if code != "" {
-		add(FieldSecrets, code)
+		p.add(FieldSecrets, code)
 	}
-	spec.SecretNames = names
+	p.spec.SecretNames = names
 
-	private, code := parsePrivateNames(value(config, FieldPrivateNames), spec.EgressAllow)
+	private, code := parsePrivateNames(p.value(FieldPrivateNames), p.spec.EgressAllow)
 	if code != "" {
-		add(FieldPrivateNames, code)
+		p.add(FieldPrivateNames, code)
 	}
-	spec.PrivateNames = private
-	return spec, errs
+	p.spec.PrivateNames = private
 }
 
 // parsePrivateNames reads the comma-separated hostnames a profile asks to
