@@ -28,9 +28,10 @@ push in it. It is also the authority on host behaviour. Read
 ## Commands
 
 ```sh
-make lint        # gofmt, go vet, manifest check with Kandev's own validator
-make test        # Go tests (make test-race is what CI runs)
+make lint        # gofmt, vet, manifest check, tsc, golangci-lint, ESLint, dependency-cruiser
+make test        # Go tests, layer rules included (make test-race is what CI runs)
 make test-ui     # typecheck, build ui/bundle.js, vitest (npm ci first)
+make metrics     # the most complex functions, without failing
 make verify-package-host
 ```
 
@@ -38,19 +39,37 @@ Run `make lint && make test-race` before claiming a change is done.
 
 ## Architecture rule
 
-| Package | Owns |
-| --- | --- |
-| `internal/profile/` | Executor profile parsing and validation: pure |
-| `internal/hosts/` | Host registry and placement: ports (`Store`, `Prober`), no SSH, no SDK |
-| `internal/pki/` | The plugin's root CA, host certificates, renewal decision, trust check: pure crypto |
-| `internal/msbctl/` | Every detail of the `msbctl kandev` protocol |
-| `internal/sshx/` | SSH: key, host key pinning, pool, quoting, the one-off admin login |
-| `internal/hostsetup/` | Setting a machine up over an admin login: accounts, packages, firewall, step order; msb-manager specifics come from `internal/msbctl/setup.go` |
-| `internal/plugin/` | SDK wiring, actions, provider RPCs |
-| `ui/` | The settings pages: host components only (`host.ui`, `host.jsx`), actions through `invoke` in `ui/src/api.ts`; pure helpers in `ui/src/model.ts` |
+Ports and adapters in six layers; an import only points down.
+[docs/architecture.md](docs/architecture.md) has the layer table, the
+thresholds, and the practices to follow. `internal/archtest` fails the tests on
+an import that crosses a layer, and on a new package missing from its table.
+
+| Layer | Package | Owns |
+| --- | --- | --- |
+| foundation | `internal/remote/` | Shell quoting, a command's output, the admin login, the kinds of failure to reach a host |
+| foundation | `internal/kandev/` | The late-bound Host, plugin-wide state documents, JSON action responses; `kandevtest/` is an in-memory host |
+| model | `internal/egress/`, `internal/profile/`, `internal/secrets/` | Egress policy, executor profile, secret index: parsing and validation, pure |
+| model | `internal/hosts/` | Host registry and placement: ports (`Store`, `Prober`), no SSH, no SDK |
+| model | `internal/pki/` | The plugin's root CA, host certificates, renewal decision, trust check: pure crypto |
+| model | `internal/msbctl/` | Every detail of the `msbctl kandev` protocol, run through its `Runner` port |
+| feature | `internal/hostcheck/` | Test's diagnosis and certificate care |
+| feature | `internal/sandbox/` | The provider's decisions: resource state, bootstrap, provision request, placement, recovery, Kandev's states, lease headers |
+| feature | `internal/readiness/` | `setup.status`'s items |
+| feature | `internal/hostsetup/` | Setting a machine up over an admin login, and the setup and upgrade jobs; msb-manager specifics come from `internal/msbctl/setup.go` |
+| adapter | `internal/sshx/` | SSH: the keyring, host key pinning, pool, the one-off admin login |
+| adapter | `internal/store/` | Every Host state key, secret key and document layout |
+| transport | `internal/plugin/` | One handler per surface, each holding only the ports it uses; `wire.go` is the only file that names an adapter |
+| — | `ui/` | The settings pages: host components only (`host.ui`, `host.jsx`), actions through `invoke` in `ui/src/api.ts`; the pure model in `ui/src/model.ts`, checked by dependency-cruiser |
 
 **Nothing outside `internal/msbctl` parses msbctl output or names a verb.
-Nothing in `internal/msbctl` or `internal/sshx` decides placement or policy.**
+Nothing in `internal/msbctl` or `internal/sshx` decides placement or policy.
+Nothing outside `internal/store` knows a state or secret key. No feature
+imports the SDK.**
+
+**The lint gate is a ceiling, not a target.** `.golangci.yml` and
+`eslint.config.mjs` cap complexity, length and nesting. When a change hits a
+limit, split the function into named steps; do not raise the limit or add a
+`nolint` without a reason on the line.
 
 ## The secrets to protect
 
@@ -108,7 +127,7 @@ Verified in `../kandev` at v0.97.0.
 - `access: admin` actions need `min_kandev_version` ≥ 0.91.1; actions need a
   `scope` even when, like the host registry, the data is plugin-wide.
 - Host state round-trips through JSON: numbers come back as `float64`.
-  Decode by re-encoding, as `stateStore` does.
+  Decode by re-encoding, as `kandev.LoadDocument` does.
 - **Leases must be HTTPS** and are verified against the Kandev server's
   **system** roots (`endpoint_transport.go`; no custom TLS config,
   `InsecureSkipVerify` forced off). Hence the plugin's name-constrained
@@ -146,9 +165,9 @@ Verified in `../kandev` at v0.97.0.
 
 `Runtime.SetHost` starts one maintainer goroutine (`maintainer.go`); `Close`
 cancels and drains it, and nothing restarts it after. Each pass, every 15
-minutes, runs Test's check (`checkHost`) on every host: that re-issues host
-certificates that need it, and the result is kept as the host's status for
-`hosts.list` (`status.go`). Tests set `maintEvery = 0` and call
+minutes, runs Test's check (`hostcheck.Checker.Check`) on every host: that
+re-issues host certificates that need it, and the result is kept as the host's
+status for `hosts.list` (`store.Status`). Tests set `maintEvery = 0` and call
 `maintainHosts` directly.
 
 ## Conventions
