@@ -30,6 +30,12 @@ type statusReader interface {
 	Load(ctx context.Context) (map[string]hostcheck.Status, error)
 }
 
+// statusStore reads and keeps the hosts' last checks.
+type statusStore interface {
+	statusReader
+	statusWriter
+}
+
 // rootReader is the plugin's root; pki.ErrNoRoot until one is created.
 type rootReader interface {
 	Root(ctx context.Context) (*pki.Root, error)
@@ -53,4 +59,11 @@ type connector func(ctx context.Context) (*msbctl.Client, error)
 type hostTester interface {
 	Test(ctx context.Context, h hosts.Host) (hostcheck.Result, error)
 	Forget(ctx context.Context, name string)
+}
+
+// hostKeys scans, checks and fingerprints SSH host keys.
+type hostKeys interface {
+	Scan(ctx context.Context, dest string) (string, error)
+	Check(line string) error
+	Fingerprint(line string) string
 }

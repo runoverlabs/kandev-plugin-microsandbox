@@ -28,16 +28,18 @@ func NewRuntime() *Runtime {
 	host := kandev.Provider(r.Host)
 	now := func() time.Time { return r.now() }
 
-	r.registry = store.NewRegistry(host)
-	r.status = store.NewStatus(host, now)
-	r.ca = store.NewCA(host, now)
+	registry := store.NewRegistry(host)
+	ca := store.NewCA(host, now)
+	r.registry, r.status, r.ca = registry, store.NewStatus(host, now), ca
 	policy := store.NewEgress(host)
 	secretStore := store.NewSecrets(host, now)
 	apiURL := store.NewAPIURL(host, now)
 
-	r.keys = sshx.NewKeyring(store.NewSSHKey(host), r.dialer)
+	keys := sshx.NewKeyring(store.NewSSHKey(host), r.dialer)
+	r.keys = keys
+	hostKeys := sshx.HostKeys{Dialer: r.dialer}
 	r.connect = func(ctx context.Context) (*msbctl.Client, error) {
-		pool, err := r.keys.Pool(ctx)
+		pool, err := keys.Pool(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +49,7 @@ func NewRuntime() *Runtime {
 
 	checker := &hostcheck.Checker{
 		Roots: r.ca, Egress: policy, Trusted: trusted, Now: now,
-		PublicKey: func(ctx context.Context) string { key, _ := r.keys.PublicKey(ctx); return key },
+		PublicKey: func(ctx context.Context) string { key, _ := keys.PublicKey(ctx); return key },
 	}
 	tester := &statusTester{connect: r.connect, checker: checker, status: r.status}
 	scope := &rootScope{roots: r.ca}
@@ -70,15 +72,15 @@ func NewRuntime() *Runtime {
 	}
 	r.actions = merge(
 		(&hostActions{
-			registry: r.registry, status: r.status, keys: r.keys, connect: r.connect, tester: tester, scope: scope,
-			healer: &healAfterWrite{roots: r.ca, connect: r.connect, checker: checker}, dialer: r.dialer,
+			registry: r.registry, status: r.status, keys: keys, connect: r.connect, tester: tester, scope: scope,
+			healer: &healAfterWrite{roots: r.ca, connect: r.connect, checker: checker}, hostKeys: hostKeys,
 		}).routes(),
 		(&caActions{roots: r.ca, trusted: trusted}).routes(),
 		(&secretActions{secrets: secretStore}).routes(),
 		(&egressActions{policy: policy}).routes(),
-		(&jobActions{manager: manager, jobs: r.jobs, registry: r.registry, keys: r.keys, connect: r.connect, scope: scope}).routes(),
+		(&jobActions{manager: manager, jobs: r.jobs, registry: r.registry, keys: keys, connect: r.connect, scope: scope, hostKeys: hostKeys}).routes(),
 		(&readinessAction{report: readiness.Report{
-			Root: r.ca.Root, Trusted: trusted, Getenv: func(name string) string { return r.getenv(name) },
+			Root: ca.Root, Trusted: trusted, Getenv: func(name string) string { return r.getenv(name) },
 			SeenAPI: func(ctx context.Context) (string, string, error) {
 				seen, err := apiURL.Load(ctx)
 				return seen.URL, seen.SeenAt, err

@@ -11,7 +11,6 @@ import (
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/kandev"
 	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/sshx"
 )
 
 // Action keys, matching manifest.yaml.
@@ -37,7 +36,7 @@ type hostActions struct {
 	tester   hostTester
 	healer   *healAfterWrite
 	scope    *rootScope
-	dialer   sshx.Dialer
+	hostKeys hostKeys
 }
 
 func (a *hostActions) routes() map[string]actionFunc {
@@ -60,12 +59,11 @@ type hostView struct {
 	Status      *hostcheck.Status `json:"status,omitempty"`
 }
 
-func viewOf(h hosts.Host) hostView {
+func viewOf(keys hostKeys, h hosts.Host) hostView {
 	if h.Labels == nil {
 		h.Labels = []string{}
 	}
-	fingerprint, _ := sshx.Fingerprint(h.HostKey)
-	return hostView{Host: h, Fingerprint: fingerprint}
+	return hostView{Host: h, Fingerprint: keys.Fingerprint(h.HostKey)}
 }
 
 func (a *hostActions) list(ctx context.Context, body []byte) kandev.Response {
@@ -86,7 +84,7 @@ func (a *hostActions) list(ctx context.Context, body []byte) kandev.Response {
 	}
 	views := make([]hostView, 0, len(registry.Hosts))
 	for _, h := range registry.Hosts {
-		view := viewOf(h)
+		view := viewOf(a.hostKeys, h)
 		if s, found := status[h.Name]; found {
 			view.Status = &s
 		}
@@ -114,13 +112,12 @@ func (a *hostActions) scan(ctx context.Context, body []byte) kandev.Response {
 	if _, _, _, err := hosts.ParseSSH(dest); err != nil {
 		return kandev.Fail(http.StatusUnprocessableEntity, "ssh: "+err.Error())
 	}
-	key, err := sshx.ScanHostKey(ctx, dest, a.dialer)
+	key, err := a.hostKeys.Scan(ctx, dest)
 	if err != nil {
 		log.Printf("%s %s: %v", ActionHostsScan, dest, err)
 		return kandev.Fail(http.StatusBadGateway, "could not reach the host's SSH server")
 	}
-	fingerprint, _ := sshx.Fingerprint(key)
-	return kandev.OK(map[string]any{"host_key": key, "fingerprint": fingerprint})
+	return kandev.OK(map[string]any{"host_key": key, "fingerprint": a.hostKeys.Fingerprint(key)})
 }
 
 func (a *hostActions) add(ctx context.Context, body []byte) kandev.Response {
@@ -143,7 +140,7 @@ func (a *hostActions) write(ctx context.Context, body []byte, action string, cha
 	if res, refused := a.scope.refuse(ctx, in); refused {
 		return res
 	}
-	if _, err := sshx.ParseHostKey(in.HostKey); err != nil && strings.TrimSpace(in.HostKey) != "" {
+	if err := a.hostKeys.Check(in.HostKey); err != nil && strings.TrimSpace(in.HostKey) != "" {
 		return validationFailure(&hosts.ValidationError{Fields: []hosts.FieldError{{Field: "host_key", Message: err.Error()}}})
 	}
 	registry, err := a.registry.Mutate(ctx, func(reg hosts.Registry) (hosts.Registry, error) { return change(reg, in) })
@@ -158,7 +155,7 @@ func (a *hostActions) write(ctx context.Context, body []byte, action string, cha
 	if action == ActionHostsAdd {
 		status = http.StatusCreated
 	}
-	out := map[string]any{"host": viewOf(saved)}
+	out := map[string]any{"host": viewOf(a.hostKeys, saved)}
 	if outcome, tried := a.healer.heal(ctx, saved); tried {
 		out["tls"] = outcome
 	}
@@ -183,7 +180,7 @@ func (a *hostActions) drain(ctx context.Context, body []byte) kandev.Response {
 		return kandev.Internal(ActionHostsDrain, registryWhat, err)
 	}
 	saved, _ := registry.Find(in.Name)
-	return kandev.OK(map[string]any{"host": viewOf(saved)})
+	return kandev.OK(map[string]any{"host": viewOf(a.hostKeys, saved)})
 }
 
 // remove refuses to forget a host that still owns kandev sandboxes: every

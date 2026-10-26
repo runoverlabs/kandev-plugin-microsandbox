@@ -27,6 +27,7 @@ type jobActions struct {
 	keys     publicKeys
 	connect  connector
 	scope    *rootScope
+	hostKeys hostKeys
 }
 
 func (a *jobActions) routes() map[string]actionFunc {
@@ -39,10 +40,10 @@ type jobView struct {
 	Host *hostView `json:"host,omitempty"`
 }
 
-func viewJob(job hostsetup.Job) jobView {
+func viewJob(keys hostKeys, job hostsetup.Job) jobView {
 	view := jobView{Job: job}
 	if job.Host != nil {
-		host := viewOf(*job.Host)
+		host := viewOf(keys, *job.Host)
 		view.Host = &host
 	}
 	return view
@@ -58,7 +59,7 @@ func (a *jobActions) started(id string, err error) kandev.Response {
 		return kandev.Fail(http.StatusServiceUnavailable, err.Error())
 	}
 	job, _ := a.jobs.Snapshot(id)
-	return kandev.Response{Status: http.StatusAccepted, Body: viewJob(job)}
+	return kandev.Response{Status: http.StatusAccepted, Body: viewJob(a.hostKeys, job)}
 }
 
 func (a *jobActions) setup(ctx context.Context, body []byte) kandev.Response {
@@ -128,5 +129,5 @@ func (a *jobActions) status(_ context.Context, body []byte) kandev.Response {
 	if !found {
 		return kandev.Fail(http.StatusNotFound, "no such setup job; finished jobs are kept for an hour, and none survives a plugin restart")
 	}
-	return kandev.OK(viewJob(job))
+	return kandev.OK(viewJob(a.hostKeys, job))
 }

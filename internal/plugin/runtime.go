@@ -8,6 +8,7 @@ package plugin
 import (
 	"context"
 	"crypto/x509"
+	"net"
 	"net/http"
 	"time"
 
@@ -15,12 +16,15 @@ import (
 
 	"kandev-plugin-microsandbox/internal/hostsetup"
 	"kandev-plugin-microsandbox/internal/kandev"
-	"kandev-plugin-microsandbox/internal/sshx"
-	"kandev-plugin-microsandbox/internal/store"
 )
 
 // actionTimeout bounds one action, which may make one SSH round trip.
 const actionTimeout = 20 * time.Second
+
+// netDialer opens the TCP connection under SSH. *net.Dialer satisfies it.
+type netDialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
 
 // actionFunc serves one action key.
 type actionFunc func(ctx context.Context, body []byte) kandev.Response
@@ -32,7 +36,7 @@ type Runtime struct {
 
 	// Knobs a test may change before the first call; the graph reads them
 	// through closures.
-	dialer sshx.Dialer
+	dialer netDialer
 	now    func() time.Time
 	// getenv reads the plugin process's environment, which is Kandev's.
 	getenv func(string) string
@@ -40,11 +44,11 @@ type Runtime struct {
 	// roots, which is what Kandev verifies leases against.
 	trustPool *x509.CertPool
 
-	keys     *sshx.Keyring
+	keys     interface{ Close() }
 	jobs     *hostsetup.Jobs
-	registry *store.Registry
-	status   *store.Status
-	ca       *store.CA
+	registry registryWriter
+	status   statusStore
+	ca       rootStore
 	connect  connector
 
 	actions  map[string]actionFunc
