@@ -61,6 +61,17 @@ func TestAddUpdateDrainRoundTrip(t *testing.T) {
 	assert.Equal(t, []any{"gpu"}, list[0].(map[string]any)["labels"])
 }
 
+// Without a root there is no certificate to issue, so a write never reaches
+// for the plugin's key, let alone generates one.
+func TestAddWithoutARootLeavesTheKeyAlone(t *testing.T) {
+	host := newFakeHost()
+	r := newRuntime(t, host)
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	require.Equal(t, 201, status, body)
+	assert.NotContains(t, body, "tls")
+	assert.Empty(t, host.Secret(sshKeySecret))
+}
+
 func TestAddRejectsBadInput(t *testing.T) {
 	r := newRuntime(t, newFakeHost())
 	status, body := call(t, r, ActionHostsAdd, hostBody("Bad Name", "sbx-01", "ssh-ed25519 AAAA", ""))

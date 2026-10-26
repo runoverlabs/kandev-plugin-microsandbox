@@ -318,9 +318,6 @@ type healAfterWrite struct {
 }
 
 func (h *healAfterWrite) heal(ctx context.Context, saved hosts.Host) (hostcheck.TLSOutcome, bool) {
-	client, err := h.connect(ctx)
-	if err != nil {
-		return hostcheck.TLSOutcome{}, false
-	}
-	return h.checker.HealNow(ctx, client, saved)
+	connect := func(ctx context.Context) (hostcheck.Host, error) { return h.connect(ctx) }
+	return h.checker.HealNow(ctx, connect, saved)
 }
