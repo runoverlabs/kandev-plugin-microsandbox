@@ -62,7 +62,7 @@ jobs:
 
       # The release binary, checksummed, like gitleaks in security.yml:
       # golangci-lint does not support `go install`. Keep the version in step
-      # with the Makefile.
+      # with the Makefile and release.yml.
       - name: Install golangci-lint
         env:
           GOLANGCI_LINT_VERSION: "2.15.0"
