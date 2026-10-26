@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kandev-plugin-microsandbox/internal/hostcheck"
 	"kandev-plugin-microsandbox/internal/msbctl"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -115,7 +116,7 @@ func (f *caFixture) createRoot(t *testing.T) map[string]any {
 
 func (f *caFixture) trustRoot(t *testing.T) {
 	t.Helper()
-	root, err := f.r.root(t.Context())
+	root, err := f.r.ca.Root(t.Context())
 	require.NoError(t, err)
 	f.r.trustPool.AddCert(root.Cert)
 }
@@ -147,8 +148,8 @@ func TestCACreateStoresTheKeyOnlyAsASecret(t *testing.T) {
 	raw, _ := json.Marshal(body)
 	assert.NotContains(t, string(raw), "PRIVATE KEY")
 
-	assert.Contains(t, f.host.secrets[caKeySecret], "PRIVATE KEY")
-	state, _ := json.Marshal(f.host.state)
+	assert.Contains(t, f.host.Secret(caKeySecret), "PRIVATE KEY")
+	state, _ := json.Marshal(f.host.State())
 	assert.NotContains(t, string(state), "PRIVATE KEY", "the root key never reaches Host state")
 
 	// A restarted plugin loads the same root.
@@ -183,13 +184,13 @@ func TestAddIssuesACertificateAndTheKeyTravelsOnStdinOnly(t *testing.T) {
 	f.createRoot(t)
 	p := newProxyHost()
 	server, body := f.addProxyHost(t, "sbx-01", p)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, "missing", body["tls"].(map[string]any)["reason"])
 
 	installed, count := p.state()
 	assert.Equal(t, 1, count)
 	assert.Equal(t, "sbx-01.tailnet.ts.net", installed.Subject)
-	root, err := f.r.root(t.Context())
+	root, err := f.r.ca.Root(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, root.Fingerprint(), installed.IssuerSHA256)
 	for _, exec := range server.Execs() {
@@ -212,7 +213,7 @@ func TestTestReportsAnUntrustedRootThenPasses(t *testing.T) {
 	f.trustRoot(t)
 	_, body = call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsOK, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSOK, body["tls"].(map[string]any)["state"])
 }
 
 func TestTestWithoutARootSaysSo(t *testing.T) {
@@ -233,7 +234,7 @@ func TestTestHealsAnExpiringCertificateBeforeReporting(t *testing.T) {
 
 	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, "expiring", body["tls"].(map[string]any)["reason"])
 	_, count := p.state()
 	assert.Equal(t, 2, count)
@@ -259,10 +260,10 @@ func TestMaintainerHealsEveryHostWithoutBeingAsked(t *testing.T) {
 	failing.mu.Unlock()
 
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["healthy"].State)
-	assert.Equal(t, tlsRenewed, outcomes["expiring"].State)
-	assert.Equal(t, tlsRenewed, outcomes["draining"].State, "draining hosts still serve sessions")
-	assert.Equal(t, tlsFailed, outcomes["failing"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["healthy"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["expiring"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["draining"].State, "draining hosts still serve sessions")
+	assert.Equal(t, hostcheck.TLSFailed, outcomes["failing"].State)
 	assert.Equal(t, "unreachable", outcomes["gone"].Reason)
 
 	// The next pass retries what failed, and leaves the rest alone.
@@ -270,8 +271,8 @@ func TestMaintainerHealsEveryHostWithoutBeingAsked(t *testing.T) {
 	failing.failInstall = false
 	failing.mu.Unlock()
 	outcomes = f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["failing"].State)
-	assert.Equal(t, tlsOK, outcomes["healthy"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["failing"].State)
+	assert.Equal(t, hostcheck.TLSOK, outcomes["healthy"].State)
 	_, installs := healthy.state()
 	assert.Equal(t, 2, installs, "a valid certificate is not re-issued")
 }
@@ -285,7 +286,7 @@ func TestMaintainerReissuesAfterTheRootIsReplaced(t *testing.T) {
 	require.Equal(t, 201, status)
 
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["sbx-01"].State)
 	assert.Equal(t, "other_root", outcomes["sbx-01"].Reason)
 	installed, _ := p.state()
 	assert.Equal(t, replaced["sha256"], installed.IssuerSHA256)
@@ -297,7 +298,7 @@ func TestMaintainerLeavesNonProxyHostsAndNoRootAlone(t *testing.T) {
 	server, _ := f.addProxyHost(t, "sbx-01", p)
 	// Without a root the host is still checked, for its status, but
 	// nothing is installed.
-	assert.Equal(t, tlsNoRoot, f.r.maintainHosts(t.Context())["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSNoRoot, f.r.maintainHosts(t.Context())["sbx-01"].State)
 	for _, exec := range server.Execs() {
 		assert.Equal(t, "msbctl kandev health", exec.Command, "health only")
 	}
@@ -307,7 +308,7 @@ func TestMaintainerLeavesNonProxyHostsAndNoRootAlone(t *testing.T) {
 	p.mode = "tailscale"
 	p.mu.Unlock()
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsNotProxy, outcomes["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSNotProxy, outcomes["sbx-01"].State)
 	_, installs := p.state()
 	assert.Equal(t, 0, installs)
 }
@@ -356,6 +357,6 @@ func TestTestReportsTheHealedStateNotTheStaleOne(t *testing.T) {
 
 	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, true, body["health"].(map[string]any)["serve"].(map[string]any)["ok"])
 }

@@ -11,7 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"kandev-plugin-microsandbox/internal/hosts"
+	"kandev-plugin-microsandbox/internal/profile"
+	"kandev-plugin-microsandbox/internal/sandbox"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -25,14 +26,14 @@ func TestListGeneratesOneKeyAndKeepsIt(t *testing.T) {
 	assert.True(t, strings.HasPrefix(publicKey, "ssh-ed25519 "))
 	assert.Equal(t, "msbctl host authorize '"+publicKey+"' --kandev", body["authorize"])
 	assert.Equal(t, []any{}, body["hosts"])
-	private := host.secrets[sshKeySecret]
+	private := host.Secret(sshKeySecret)
 	require.NotEmpty(t, private)
 
 	// A restarted plugin process reads the same key back.
 	again := newRuntime(t, host)
 	_, body = call(t, again, ActionHostsList, nil)
 	assert.Equal(t, publicKey, body["public_key"])
-	assert.Equal(t, private, host.secrets[sshKeySecret])
+	assert.Equal(t, private, host.Secret(sshKeySecret))
 	assert.NotContains(t, body, "private", "the private key never leaves the secret store")
 }
 
@@ -92,7 +93,7 @@ func TestActionsWithoutHostAreUnavailable(t *testing.T) {
 
 func TestRegistryFailureDoesNotLeakTheCause(t *testing.T) {
 	host := newFakeHost()
-	host.stateErr = errors.New("sqlite: disk I/O error at /home/op/.kandev/data/kandev.db")
+	host.StateErr = errors.New("sqlite: disk I/O error at /home/op/.kandev/data/kandev.db")
 	r := newRuntime(t, host)
 	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
 	assert.Equal(t, 500, status)
@@ -243,10 +244,11 @@ func TestOutdatedHostIsDiagnosedAndNeverPlaced(t *testing.T) {
 	assert.Equal(t, "outdated", body["problem"])
 	assert.Contains(t, body["hint"], "workspace_disk")
 
-	client, err := r.client(t.Context())
+	client, err := r.connect(t.Context())
 	require.NoError(t, err)
-	registry, err := r.loadRegistry(t.Context())
+	registry, err := r.registry.Load(t.Context())
 	require.NoError(t, err)
-	_, err = hosts.Place(t.Context(), registry.Hosts, &placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
-	assert.ErrorIs(t, err, hosts.ErrUnreachable, "an outdated host is not a candidate")
+	_, failure := sandbox.PlaceOrReuse(t.Context(), client, r.provider.healer, registry.Hosts, profile.Spec{CPUs: 1, MemoryMiB: 512}, "op-1")
+	require.NotNil(t, failure)
+	assert.Equal(t, "hostsUnreachable", failure.MessageID, "an outdated host is not a candidate")
 }

@@ -91,7 +91,7 @@ func TestValidateNeverEchoesSecretValues(t *testing.T) {
 
 func TestValidateWithUnreadableRegistryIsUnavailable(t *testing.T) {
 	host := newFakeHost()
-	host.stateErr = errors.New("db locked")
+	host.StateErr = errors.New("db locked")
 	r := newRuntime(t, host)
 	res := validate(t, r, profileConfig("label:default"), nil)
 	require.NotNil(t, res.Error)

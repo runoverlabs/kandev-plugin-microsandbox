@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"kandev-plugin-microsandbox/internal/hostcheck"
+	"kandev-plugin-microsandbox/internal/kandev"
 )
 
 // Maintenance cadence. A pass is one health call per host, so it runs often
@@ -20,25 +22,34 @@ const (
 	maintainHostTimeout = 45 * time.Second
 )
 
-// SetHost stores the Host and starts the maintainer. Kandev calls it once,
-// from a background goroutine, after the broker connection is up.
-func (r *Runtime) SetHost(h pluginsdk.Host) {
-	r.UnimplementedPlugin.SetHost(h)
-	r.startMaintainer()
+// maintainer is the one background goroutine: SetHost starts it, Close
+// cancels and drains it, and nothing restarts it after.
+type maintainer struct {
+	registry registryReader
+	connect  connector
+	checker  *hostcheck.Checker
+	record   statusWriter
+
+	maintMu     sync.Mutex
+	maintFirst  time.Duration
+	maintEvery  time.Duration // zero disables the maintainer
+	maintCancel context.CancelFunc
+	maintWG     sync.WaitGroup
+	closed      bool
 }
 
-func (r *Runtime) startMaintainer() {
-	r.maintMu.Lock()
-	defer r.maintMu.Unlock()
-	if r.maintEvery <= 0 || r.maintCancel != nil || r.closed {
+func (m *maintainer) startMaintainer() {
+	m.maintMu.Lock()
+	defer m.maintMu.Unlock()
+	if m.maintEvery <= 0 || m.maintCancel != nil || m.closed {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r.maintCancel = cancel
-	r.maintWG.Add(1)
+	m.maintCancel = cancel
+	m.maintWG.Add(1)
 	go func() {
-		defer r.maintWG.Done()
-		timer := time.NewTimer(r.maintFirst)
+		defer m.maintWG.Done()
+		timer := time.NewTimer(m.maintFirst)
 		defer timer.Stop()
 		for {
 			select {
@@ -46,23 +57,23 @@ func (r *Runtime) startMaintainer() {
 				return
 			case <-timer.C:
 			}
-			r.maintainHosts(ctx)
-			timer.Reset(r.maintEvery)
+			m.maintainHosts(ctx)
+			timer.Reset(m.maintEvery)
 		}
 	}()
 }
 
 // stopMaintainer cancels the maintainer and waits for it to finish.
-func (r *Runtime) stopMaintainer() {
-	r.maintMu.Lock()
-	r.closed = true
-	cancel := r.maintCancel
-	r.maintCancel = nil
-	r.maintMu.Unlock()
+func (m *maintainer) stopMaintainer() {
+	m.maintMu.Lock()
+	m.closed = true
+	cancel := m.maintCancel
+	m.maintCancel = nil
+	m.maintMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	r.maintWG.Wait()
+	m.maintWG.Wait()
 }
 
 // maintainHosts is one pass: every registered host, draining ones included
@@ -70,29 +81,29 @@ func (r *Runtime) stopMaintainer() {
 // proxy host a valid certificate, and its status is kept for hosts.list. An
 // unreachable host is retried next pass. It returns what certificate care
 // did per host, for tests and logs.
-func (r *Runtime) maintainHosts(ctx context.Context) map[string]tlsOutcome {
-	registry, err := r.loadRegistry(ctx)
+func (m *maintainer) maintainHosts(ctx context.Context) map[string]hostcheck.TLSOutcome {
+	registry, err := m.registry.Load(ctx)
 	if err != nil {
-		if !errors.Is(err, ErrNoHost) {
+		if !errors.Is(err, kandev.ErrNoHost) {
 			log.Printf("maintain: %v", err)
 		}
 		return nil
 	}
-	client, err := r.client(ctx)
+	client, err := m.connect(ctx)
 	if err != nil {
 		log.Printf("maintain: %v", err)
 		return nil
 	}
-	outcomes := map[string]tlsOutcome{}
+	outcomes := map[string]hostcheck.TLSOutcome{}
 	for _, h := range registry.Hosts {
 		if ctx.Err() != nil {
 			return outcomes
 		}
 		hostCtx, cancel := context.WithTimeout(ctx, maintainHostTimeout)
-		result := r.checkHost(hostCtx, client, h)
+		result := m.checker.Check(hostCtx, client, h)
 		cancel()
-		outcomes[h.Name] = result.outcome
-		r.recordStatus(ctx, h.Name, result)
+		outcomes[h.Name] = result.Outcome()
+		m.record.Record(ctx, h.Name, result)
 	}
 	return outcomes
 }

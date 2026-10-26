@@ -12,16 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// AdminAuth is an operator's own login to a machine, given once to set it up.
-// It is secret: it lives only in memory for one setup, never in state, argv,
-// a log line or a response.
-type AdminAuth struct {
-	PrivateKeyPEM string
-	Passphrase    string
-	Password      string
-}
-
-func (a AdminAuth) methods() ([]ssh.AuthMethod, error) {
+func adminMethods(a remote.AdminAuth) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 	if strings.TrimSpace(a.PrivateKeyPEM) != "" {
 		var signer ssh.Signer
@@ -67,8 +58,8 @@ const MaxAdminOutput = 256 << 10
 
 // DialAdmin connects to dest with the operator's login, accepting only the
 // pinned host key.
-func DialAdmin(ctx context.Context, dialer Dialer, dest, hostKey string, auth AdminAuth) (*Admin, error) {
-	methods, err := auth.methods()
+func DialAdmin(ctx context.Context, dialer Dialer, dest, hostKey string, auth remote.AdminAuth) (*Admin, error) {
+	methods, err := adminMethods(auth)
 	if err != nil {
 		return nil, err
 	}

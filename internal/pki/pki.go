@@ -49,6 +49,8 @@ var (
 	// ErrUntrusted means the host's certificate does not chain to a root
 	// the system trusts: the root is not installed on the Kandev server.
 	ErrUntrusted = errors.New("the host's certificate is not trusted by this machine's system roots")
+	// ErrNoRoot means no root has been created yet.
+	ErrNoRoot = errors.New("no root certificate has been created")
 )
 
 // Constraints are what the root may certify.
