@@ -34,10 +34,11 @@ type Runtime struct {
 	pluginsdk.UnimplementedPlugin
 	maintainer
 
+	// dialer opens every SSH connection; wire.go hands it out at build time.
+	dialer netDialer
 	// Knobs a test may change before the first call; the graph reads them
 	// through closures.
-	dialer netDialer
-	now    func() time.Time
+	now func() time.Time
 	// getenv reads the plugin process's environment, which is Kandev's.
 	getenv func(string) string
 	// trustPool is the root pool trust checks use; nil means the system

@@ -124,3 +124,27 @@ func FindOperation(ctx context.Context, api Operations, candidates []hosts.Host,
 	}
 	return out
 }
+
+// Recovery outcomes, as Kandev names them.
+const (
+	RecoverFound   = "found"
+	RecoverAbsent  = "absent"
+	RecoverUnknown = "unknown"
+)
+
+// Recovered is what a provision whose reply was lost resolves to: found on
+// exactly one host, absent from every host, or unknown while any host cannot
+// answer. A sandbox found for the operation but made from another input is a
+// conflict. Kandev never mints a new operation to escape "unknown".
+func Recovered(found Found, op Operation) (string, *Failure) {
+	switch {
+	case found.OK && (found.Record.Env != op.Environment || found.Record.InputDigest != op.InputDigest):
+		return "", Fail(msbctl.CodeConflict, "operationMismatch")
+	case found.OK:
+		return RecoverFound, nil
+	case found.Unknown:
+		return RecoverUnknown, nil
+	default:
+		return RecoverAbsent, nil
+	}
+}

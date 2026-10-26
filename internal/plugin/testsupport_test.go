@@ -13,6 +13,7 @@ import (
 	"kandev-plugin-microsandbox/internal/kandev/kandevtest"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
+	"kandev-plugin-microsandbox/internal/store"
 )
 
 // fakeHost is the in-memory Kandev host the tests drive the runtime with.
@@ -22,9 +23,9 @@ func newFakeHost() *fakeHost { return kandevtest.NewHost() }
 
 // Where the plugin keeps its keys and secret values in the secret store.
 const (
-	sshKeySecret      = "ssh-key"
-	caKeySecret       = "ca-key"
-	secretValuePrefix = "secret."
+	sshKeySecret      = store.SSHKeySecret
+	caKeySecret       = store.CAKeySecret
+	secretValuePrefix = store.SecretValuePrefix
 )
 
 func newRuntime(t *testing.T, host pluginsdk.Host) *Runtime {

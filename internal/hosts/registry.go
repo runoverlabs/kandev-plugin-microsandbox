@@ -182,11 +182,11 @@ func validateBaseURL(raw string) error {
 // addressProblem refuses the host literals Kandev refuses in a lease.
 func addressProblem(host string) error {
 	if strings.EqualFold(host, "localhost") {
-		return errors.New("loopback addresses are refused by Kandev")
+		return errors.New("Kandev refuses loopback addresses") //nolint:staticcheck // ST1005: Kandev is a name, and operators see this text
 	}
 	ip := net.ParseIP(host)
 	if ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified()) {
-		return errors.New("loopback, link-local, multicast and unspecified addresses are refused by Kandev")
+		return errors.New("Kandev refuses loopback, link-local, multicast and unspecified addresses") //nolint:staticcheck // ST1005: as above
 	}
 	return nil
 }

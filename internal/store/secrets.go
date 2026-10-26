@@ -16,9 +16,9 @@ import (
 
 const (
 	secretsKey = "secrets"
-	// secretValuePrefix keys each value in the plugin's secret store, whose
+	// SecretValuePrefix keys each value in the plugin's secret store, whose
 	// keys Kandev limits to [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}.
-	secretValuePrefix = "secret."
+	SecretValuePrefix = "secret."
 )
 
 // Secrets keeps the secret index in Host state and each value in the
@@ -89,7 +89,7 @@ func (s *Secrets) Put(ctx context.Context, meta secrets.Meta, value *string) (sa
 		return secrets.Meta{}, false, err
 	}
 	if value != nil {
-		if err := h.SetSecret(ctx, secretValuePrefix+meta.Name, *value); err != nil {
+		if err := h.SetSecret(ctx, SecretValuePrefix+meta.Name, *value); err != nil {
 			return secrets.Meta{}, false, err
 		}
 	}
@@ -119,7 +119,7 @@ func (s *Secrets) Remove(ctx context.Context, name string) error {
 	if err := s.save(ctx, next); err != nil {
 		return err
 	}
-	if err := h.DeleteSecret(ctx, secretValuePrefix+name); err != nil {
+	if err := h.DeleteSecret(ctx, SecretValuePrefix+name); err != nil {
 		log.Printf("secrets.remove %s: delete value: %v", name, err)
 	}
 	return nil
@@ -157,7 +157,7 @@ func (s *Secrets) Resolve(ctx context.Context, names []string) ([]profile.Secret
 		if at < 0 {
 			return nil, fmt.Errorf("%w: %s", secrets.ErrUnknown, name)
 		}
-		value, found, err := h.GetSecret(ctx, secretValuePrefix+name)
+		value, found, err := h.GetSecret(ctx, SecretValuePrefix+name)
 		if err != nil {
 			return nil, fmt.Errorf("read secret %s: %w", name, err)
 		}

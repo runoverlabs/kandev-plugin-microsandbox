@@ -73,7 +73,7 @@ func NewRuntime() *Runtime {
 	r.actions = merge(
 		(&hostActions{
 			registry: r.registry, status: r.status, keys: keys, connect: r.connect, tester: tester, scope: scope,
-			healer: &healAfterWrite{roots: r.ca, connect: r.connect, checker: checker}, hostKeys: hostKeys,
+			healer: &healAfterWrite{connect: r.connect, checker: checker}, hostKeys: hostKeys,
 		}).routes(),
 		(&caActions{roots: r.ca, trusted: trusted}).routes(),
 		(&secretActions{secrets: secretStore}).routes(),

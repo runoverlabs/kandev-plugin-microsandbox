@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/url"
+	"strings"
 
 	"kandev-plugin-microsandbox/internal/hosts"
 	"kandev-plugin-microsandbox/internal/msbctl"
@@ -78,4 +79,28 @@ func (c *Checker) Heal(ctx context.Context, api Host, h hosts.Host, health msbct
 	}
 	log.Printf("tls %s: installed a new certificate (%s), valid until %s", h.Name, reason, installed.NotAfter)
 	return TLSOutcome{State: TLSRenewed, Reason: reason, NotAfter: installed.NotAfter}
+}
+
+// OutsideRoot is why root could never certify h's base URL, or "" when it
+// can, or when the URL names no host yet.
+func OutsideRoot(root *pki.Root, h hosts.Host) string {
+	name := HostName(hosts.Normalize(h))
+	if name == "" || root.Permits(name) {
+		return ""
+	}
+	return "outside the names the plugin's root may certify (" + strings.Join(root.Constraints().DNSSuffixes, ", ") + ")"
+}
+
+// HealNow gives a newly added or changed host a certificate, best effort:
+// the host is saved either way, and the maintainer retries. tried is false
+// when there is no root to issue from yet.
+func (c *Checker) HealNow(ctx context.Context, api Host, h hosts.Host) (outcome TLSOutcome, tried bool) {
+	if _, err := c.Roots.Root(ctx); err != nil {
+		return TLSOutcome{}, false
+	}
+	health, err := api.Health(ctx, h)
+	if err != nil {
+		return TLSOutcome{State: TLSFailed, Reason: "unreachable"}, true
+	}
+	return c.Heal(ctx, api, h, health), true
 }

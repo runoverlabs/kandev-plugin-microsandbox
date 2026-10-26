@@ -93,7 +93,11 @@ func (j *Jobs) Start(name string, steps []Step, timeout time.Duration, fn func(c
 
 // Stop cancels every running job and waits for them.
 func (j *Jobs) Stop() {
+	// Under the lock, so a Start either registers before the cancel, and is
+	// waited for, or sees it and refuses.
+	j.mu.Lock()
 	j.cancel()
+	j.mu.Unlock()
 	j.wg.Wait()
 }
 

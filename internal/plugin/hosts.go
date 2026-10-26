@@ -304,35 +304,23 @@ func (s *rootScope) refuse(ctx context.Context, in hosts.Host) (kandev.Response,
 	if err != nil {
 		return kandev.Response{}, false
 	}
-	name := hostcheck.HostName(hosts.Normalize(in))
-	if name == "" || root.Permits(name) {
+	problem := hostcheck.OutsideRoot(root, in)
+	if problem == "" {
 		return kandev.Response{}, false
 	}
-	return validationFailure(&hosts.ValidationError{Fields: []hosts.FieldError{{
-		Field:   "base_url",
-		Message: "outside the names the plugin's root may certify (" + strings.Join(root.Constraints().DNSSuffixes, ", ") + ")",
-	}}}), true
+	return validationFailure(&hosts.ValidationError{Fields: []hosts.FieldError{{Field: "base_url", Message: problem}}}), true
 }
 
-// healAfterWrite issues a certificate for a newly added or changed host,
-// best effort: the host is saved either way, and the maintainer retries.
+// healAfterWrite issues a certificate for a newly added or changed host.
 type healAfterWrite struct {
-	roots   rootReader
 	connect connector
 	checker *hostcheck.Checker
 }
 
 func (h *healAfterWrite) heal(ctx context.Context, saved hosts.Host) (hostcheck.TLSOutcome, bool) {
-	if _, err := h.roots.Root(ctx); err != nil {
-		return hostcheck.TLSOutcome{}, false
-	}
 	client, err := h.connect(ctx)
 	if err != nil {
 		return hostcheck.TLSOutcome{}, false
 	}
-	health, err := client.Health(ctx, saved)
-	if err != nil {
-		return hostcheck.TLSOutcome{State: hostcheck.TLSFailed, Reason: "unreachable"}, true
-	}
-	return h.checker.Heal(ctx, client, saved, health), true
+	return h.checker.HealNow(ctx, client, saved)
 }

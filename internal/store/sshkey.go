@@ -6,8 +6,8 @@ import (
 	"kandev-plugin-microsandbox/internal/kandev"
 )
 
-// sshKeySecret holds the plugin's SSH private key. One key serves every host.
-const sshKeySecret = "ssh-key"
+// SSHKeySecret holds the plugin's SSH private key. One key serves every host.
+const SSHKeySecret = "ssh-key"
 
 // SSHKey keeps the plugin's SSH private key in the plugin secret store.
 type SSHKey struct{ host kandev.Provider }
@@ -21,7 +21,7 @@ func (s SSHKey) Load(ctx context.Context) (privatePEM string, found bool, err er
 	if err != nil {
 		return "", false, err
 	}
-	privatePEM, found, err = h.GetSecret(ctx, sshKeySecret)
+	privatePEM, found, err = h.GetSecret(ctx, SSHKeySecret)
 	return privatePEM, found && privatePEM != "", err
 }
 
@@ -31,5 +31,5 @@ func (s SSHKey) Store(ctx context.Context, privatePEM string) error {
 	if err != nil {
 		return err
 	}
-	return h.SetSecret(ctx, sshKeySecret, privatePEM)
+	return h.SetSecret(ctx, SSHKeySecret, privatePEM)
 }

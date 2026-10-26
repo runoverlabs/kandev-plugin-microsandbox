@@ -12,9 +12,7 @@ import (
 	"kandev-plugin-microsandbox/internal/sandbox"
 )
 
-// recover resolves a provision whose reply was lost: found on exactly one
-// host, absent from every host, or unknown while any host cannot answer.
-// Kandev never mints a new operation to escape "unknown".
+// recover resolves a provision whose reply was lost (sandbox.Recovered).
 func (p *provider) recover(ctx context.Context, req *pluginsdk.RecoverExecutorOperationRequest) *pluginsdk.RecoverExecutorOperationResponse {
 	rc := req.GetContext()
 	op := operationOf(rc)
@@ -23,20 +21,18 @@ func (p *provider) recover(ctx context.Context, req *pluginsdk.RecoverExecutorOp
 	}
 	client, registry, err := p.clientAndRegistry(ctx)
 	if err != nil {
-		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "unknown"}
+		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: sandbox.RecoverUnknown}
 	}
 	found := sandbox.FindOperation(ctx, client, registry.Hosts, op.ID)
-	switch {
-	case found.OK:
-		if found.Record.Env != op.Environment || found.Record.InputDigest != op.InputDigest {
-			return &pluginsdk.RecoverExecutorOperationResponse{Error: providerError(msbctl.CodeConflict, "operationMismatch")}
-		}
-		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "found", Resource: descriptorFor(found.Host.Name, found.Record)}
-	case found.Unknown:
-		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "unknown"}
-	default:
-		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "absent"}
+	outcome, failure := sandbox.Recovered(found, op)
+	if failure != nil {
+		return &pluginsdk.RecoverExecutorOperationResponse{Error: sdkError(failure)}
 	}
+	out := &pluginsdk.RecoverExecutorOperationResponse{Outcome: outcome}
+	if outcome == sandbox.RecoverFound {
+		out.Resource = descriptorFor(found.Host.Name, found.Record)
+	}
+	return out
 }
 
 func (p *provider) clientAndRegistry(ctx context.Context) (*msbctl.Client, hosts.Registry, error) {

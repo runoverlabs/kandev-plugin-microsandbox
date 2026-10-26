@@ -15,7 +15,7 @@ import (
 // only in the plugin secret store.
 const (
 	caKey       = "ca"
-	caKeySecret = "ca-key"
+	CAKeySecret = "ca-key"
 )
 
 // CA keeps the plugin's root certificate authority, loaded once.
@@ -55,7 +55,7 @@ func (s *CA) Root(ctx context.Context) (*pki.Root, error) {
 	if !found {
 		return nil, pki.ErrNoRoot
 	}
-	keyPEM, found, err := h.GetSecret(ctx, caKeySecret)
+	keyPEM, found, err := h.GetSecret(ctx, CAKeySecret)
 	if err != nil {
 		return nil, fmt.Errorf("read root key: %w", err)
 	}
@@ -84,7 +84,7 @@ func (s *CA) Create(ctx context.Context, c pki.Constraints) (*pki.Root, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := h.SetSecret(ctx, caKeySecret, keyPEM); err != nil {
+	if err := h.SetSecret(ctx, CAKeySecret, keyPEM); err != nil {
 		return nil, fmt.Errorf("store root key: %w", err)
 	}
 	doc := rootDocument{CertPEM: certPEM, CreatedAt: s.now().UTC().Format(time.RFC3339)}
