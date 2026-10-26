@@ -30,6 +30,9 @@ const registryWhat = "the host registry"
 // out of reach.
 const keyWhat = "the plugin's SSH key"
 
+// statusWhat is the hosts' last check results, kept for hosts.list.
+const statusWhat = "the hosts' last check results"
+
 // hostActions serve the Sandbox Hosts page. Every action is admin-only in
 // the manifest: the registry decides where every workspace's sandboxes run.
 type hostActions struct {
@@ -84,7 +87,7 @@ func (a *hostActions) list(ctx context.Context, body []byte) kandev.Response {
 	}
 	status, err := a.status.Load(ctx)
 	if err != nil {
-		return kandev.Internal(ActionHostsList, registryWhat, err)
+		return kandev.Internal(ActionHostsList, statusWhat, err)
 	}
 	views := make([]hostView, 0, len(registry.Hosts))
 	for _, h := range registry.Hosts {

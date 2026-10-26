@@ -204,6 +204,7 @@ func isOutdated(err error) bool {
 // tlsProblems are the outcomes that are a problem in themselves.
 var tlsProblems = map[string][2]string{
 	TLSNoRoot:       {"no_root", "Create the plugin's root certificate (ca.create), then install it on the Kandev server (ca.get)."},
+	TLSRootUnusable: {"root_unusable", "The plugin's root cannot be loaded; the plugin's log says why. Replace it with ca.create and replace: true, then install the new root on the Kandev server."},
 	TLSNotPermitted: {"not_permitted", "The host's base_url is outside the names the root may certify. Register it under a permitted name, or create a new root that covers it."},
 	TLSFailed:       {"tls_install_failed", "The host refused or did not accept a new certificate; it is retried automatically."},
 }

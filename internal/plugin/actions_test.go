@@ -100,6 +100,24 @@ func TestAnUnreadableKeyIsNamed(t *testing.T) {
 	assert.Equal(t, "the plugin's SSH key could not be read or saved", body["error"])
 }
 
+// statusOutage is a Kandev that cannot read the hosts' last check results.
+type statusOutage struct{ *fakeHost }
+
+func (h statusOutage) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
+	if key == "status" {
+		return nil, false, errors.New("state store down")
+	}
+	return h.fakeHost.GetState(ctx, scope, scopeID, key)
+}
+
+// Nor are the hosts' last check results.
+func TestUnreadableCheckResultsAreNamed(t *testing.T) {
+	r := newRuntime(t, statusOutage{newFakeHost()})
+	status, body := call(t, r, ActionHostsList, nil)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, "the hosts' last check results could not be read or saved", body["error"])
+}
+
 func TestAddRejectsBadInput(t *testing.T) {
 	r := newRuntime(t, newFakeHost())
 	status, body := call(t, r, ActionHostsAdd, hostBody("Bad Name", "sbx-01", "ssh-ed25519 AAAA", ""))

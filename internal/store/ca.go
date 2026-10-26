@@ -60,7 +60,7 @@ func (s *CA) Root(ctx context.Context) (*pki.Root, error) {
 		return nil, fmt.Errorf("read root key: %w", err)
 	}
 	if !found {
-		return nil, errors.New("the root's key is missing from the secret store")
+		return nil, pki.Unusable("the root's key is missing from the secret store")
 	}
 	root, err := pki.LoadRoot(doc.CertPEM, keyPEM)
 	if err != nil {

@@ -94,10 +94,12 @@ func (r Report) rootItem(ctx context.Context) (Item, error) {
 	case errors.Is(err, pki.ErrNoRoot):
 		item.State, item.Detail = Missing, "No root yet: hosts have no certificate and Kandev cannot reach any sandbox."
 		item.Fix = []string{"Create it with ca.create, naming the DNS suffixes or networks your sandbox hosts use."}
-	case err != nil:
+	case errors.Is(err, pki.ErrRootUnusable):
 		log.Printf("setup.status: root: %v", err)
 		item.State, item.Detail = Failing, "The root exists but cannot be loaded; the plugin's log says why."
 		item.Fix = []string{"Replace it with ca.create and replace: true, then install the new root on the Kandev server."}
+	case err != nil:
+		return item, err
 	case r.Trusted(root) != nil:
 		item.State, item.Detail = Untrusted, "Kandev verifies sandboxes against the system roots, which do not include the plugin's root yet."
 		item.Fix = RootInstallSteps

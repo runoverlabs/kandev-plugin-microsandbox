@@ -24,6 +24,7 @@ const (
 	TLSNotProxy     = "not_proxy"     // the host terminates TLS some other way
 	TLSNoRoot       = "no_root"       // nothing to issue from yet
 	TLSNotPermitted = "not_permitted" // the host's name is outside the root
+	TLSRootUnusable = "root_unusable" // the root exists but cannot be loaded
 	TLSOK           = "ok"
 	TLSRenewed      = "renewed"
 	TLSFailed       = "failed"
@@ -78,11 +79,16 @@ func (c *Checker) Heal(ctx context.Context, api Host, h hosts.Host, health msbct
 }
 
 // loadRoot returns the root to issue from, or, when there is none to use,
-// the outcome saying why: no root yet, or one that cannot be loaded.
+// the outcome saying why: no root yet, one that cannot be used, or a failure
+// to read it.
 func (c *Checker) loadRoot(ctx context.Context, h hosts.Host) (*pki.Root, TLSOutcome) {
 	root, err := c.Roots.Root(ctx)
 	if errors.Is(err, pki.ErrNoRoot) {
 		return nil, TLSOutcome{State: TLSNoRoot}
+	}
+	if errors.Is(err, pki.ErrRootUnusable) {
+		log.Printf("tls %s: %v", h.Name, err)
+		return nil, TLSOutcome{State: TLSRootUnusable}
 	}
 	if err != nil {
 		log.Printf("tls %s: %v", h.Name, err)

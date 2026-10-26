@@ -1,12 +1,14 @@
 package plugin
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -119,6 +121,15 @@ func (f *caFixture) trustRoot(t *testing.T) {
 	root, err := f.r.ca.Root(t.Context())
 	require.NoError(t, err)
 	f.r.trustPool.AddCert(root.Cert)
+}
+
+// restart replaces the runtime with a new one on the same Kandev, as a
+// plugin restart does: nothing it had cached survives.
+func (f *caFixture) restart(t *testing.T) {
+	t.Helper()
+	f.r = newRuntime(t, f.host)
+	f.r.now = func() time.Time { return f.clock }
+	f.r.trustPool = x509.NewCertPool()
 }
 
 // addProxyHost registers a proxy-mode fake host; the name is used in its
@@ -361,28 +372,61 @@ func TestTestReportsTheHealedStateNotTheStaleOne(t *testing.T) {
 	assert.Equal(t, true, body["health"].(map[string]any)["serve"].(map[string]any)["ok"])
 }
 
-// A root that exists but cannot be loaded is a failure to report, not the
-// "no root yet" that skips certificate care.
-func TestBrokenRootIsReportedNotSkipped(t *testing.T) {
-	host := newFakeHost()
-	require.Equal(t, 201, first(call(t, newRuntime(t, host), ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
-	require.NoError(t, host.DeleteSecret(t.Context(), caKeySecret))
-	r := newRuntime(t, host)
+// A root that exists but cannot be used is reported as such everywhere, not
+// read as "no root yet" or blamed on a host, and replacing it is the way out.
+func TestAnUnusableRootIsReportedAndReplaceable(t *testing.T) {
+	f := newCAFixture(t)
+	f.createRoot(t)
+	f.addProxyHost(t, "sbx-01", newProxyHost())
+	require.NoError(t, f.host.DeleteSecret(t.Context(), caKeySecret))
+	f.restart(t)
 
-	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
+	assert.Equal(t, "root_unusable", body["problem"])
+
+	status, body := call(t, f.r, ActionHostsAdd, hostBody("sbx-02", "msb@sbx-02", unusedHostKey))
 	require.Equal(t, 201, status, body)
-	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
+	assert.Equal(t, map[string]any{"state": "root_unusable"}, body["tls"])
 
-	status, body = call(t, r, ActionSetupStatus, nil)
+	status, body = call(t, f.r, ActionSetupStatus, nil)
 	require.Equal(t, 200, status, body)
 	root := body["items"].([]any)[0].(map[string]any)
 	assert.Equal(t, "root", root["key"])
 	assert.Equal(t, "failing", root["state"])
 	assert.Len(t, body["items"], 3, "the other items are still reported")
 
-	// Replacing it is the way out.
-	assert.Equal(t, 500, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
-	require.Equal(t, 201, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}, "replace": true})))
-	_, body = call(t, r, ActionSetupStatus, nil)
-	assert.NotEqual(t, "failing", body["items"].([]any)[0].(map[string]any)["state"])
+	status, body = call(t, f.r, ActionCACreate, map[string]any{"dns_suffixes": []string{"tailnet.ts.net"}})
+	assert.Equal(t, 409, status)
+	assert.Contains(t, body["error"], "replace: true")
+	require.Equal(t, 201, first(call(t, f.r, ActionCACreate, map[string]any{"dns_suffixes": []string{"tailnet.ts.net"}, "replace": true})))
+	_, body = call(t, f.r, ActionSetupStatus, nil)
+	assert.Equal(t, "untrusted", body["items"].([]any)[0].(map[string]any)["state"])
+}
+
+// caKeyOutage is a Kandev whose secret store fails to read the root's key,
+// as an outage would: the root itself is fine.
+type caKeyOutage struct{ *fakeHost }
+
+func (h caKeyOutage) GetSecret(ctx context.Context, key string) (string, bool, error) {
+	if key == caKeySecret {
+		return "", false, errors.New("secret store down")
+	}
+	return h.fakeHost.GetSecret(ctx, key)
+}
+
+// Failing to read the root says nothing about it, so nothing tells the
+// operator to replace it, and a replace does not go ahead blind.
+func TestAStoreOutageIsNotAnUnusableRoot(t *testing.T) {
+	host := newFakeHost()
+	require.Equal(t, 201, first(call(t, newRuntime(t, host), ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
+	key := host.Secret(caKeySecret)
+	r := newRuntime(t, caKeyOutage{host})
+
+	assert.Equal(t, 500, first(call(t, r, ActionSetupStatus, nil)))
+	assert.Equal(t, 500, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}, "replace": true})))
+	assert.Equal(t, key, host.Secret(caKeySecret), "the root is not replaced")
+
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	require.Equal(t, 201, status, body)
+	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
 }

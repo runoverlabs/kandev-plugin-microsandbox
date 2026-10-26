@@ -61,6 +61,26 @@ func (a *caActions) view(root *pki.Root) map[string]any {
 	}
 }
 
+// refuseReplace refuses to replace a root unless asked to. A root that
+// cannot be used is replaced too: that is the way out of a lost key. A
+// failure to read the store replaces nothing, as it says nothing of the root.
+func (a *caActions) refuseReplace(ctx context.Context, replace bool) (kandev.Response, bool) {
+	const pass = "; replacing it means reinstalling it on the Kandev server, so pass replace: true"
+	_, err := a.roots.Root(ctx)
+	switch {
+	case errors.Is(err, pki.ErrNoRoot):
+		return kandev.Response{}, false
+	case err != nil && !errors.Is(err, pki.ErrRootUnusable):
+		return kandev.Internal(ActionCACreate, caWhat, err), true
+	case replace:
+		return kandev.Response{}, false
+	case err != nil:
+		return kandev.Fail(http.StatusConflict, "a root exists but cannot be used ("+err.Error()+")"+pass), true
+	default:
+		return kandev.Fail(http.StatusConflict, "a root already exists"+pass), true
+	}
+}
+
 func (a *caActions) create(ctx context.Context, body []byte) kandev.Response {
 	var in struct {
 		pki.Constraints
@@ -73,12 +93,8 @@ func (a *caActions) create(ctx context.Context, body []byte) kandev.Response {
 	if err := c.Validate(); err != nil {
 		return kandev.Fail(http.StatusUnprocessableEntity, err.Error())
 	}
-	// A root that exists but cannot be loaded can still be replaced: that is
-	// the way out of a lost key.
-	if _, err := a.roots.Root(ctx); err == nil && !in.Replace {
-		return kandev.Fail(http.StatusConflict, "a root already exists; replacing it means reinstalling it on the Kandev server, so pass replace: true")
-	} else if err != nil && !errors.Is(err, pki.ErrNoRoot) && !in.Replace {
-		return kandev.Internal(ActionCACreate, caWhat, err)
+	if res, refused := a.refuseReplace(ctx, in.Replace); refused {
+		return res
 	}
 	root, err := a.roots.Create(ctx, c)
 	if err != nil {
