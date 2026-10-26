@@ -8,7 +8,6 @@ package plugin
 import (
 	"context"
 	"crypto/x509"
-	"net"
 	"net/http"
 	"time"
 
@@ -21,21 +20,16 @@ import (
 // actionTimeout bounds one action, which may make one SSH round trip.
 const actionTimeout = 20 * time.Second
 
-// netDialer opens the TCP connection under SSH. *net.Dialer satisfies it.
-type netDialer interface {
-	DialContext(ctx context.Context, network, address string) (net.Conn, error)
-}
-
 // actionFunc serves one action key.
 type actionFunc func(ctx context.Context, body []byte) kandev.Response
 
 // Runtime is the plugin value pluginsdk.Serve runs.
 type Runtime struct {
 	pluginsdk.UnimplementedPlugin
+	// maintainer also holds the registry and connector the tests reach as
+	// r.registry and r.connect; the Runtime keeps no second copy.
 	maintainer
 
-	// dialer opens every SSH connection; wire.go hands it out at build time.
-	dialer netDialer
 	// Knobs a test may change before the first call; the graph reads them
 	// through closures.
 	now func() time.Time
@@ -45,12 +39,10 @@ type Runtime struct {
 	// roots, which is what Kandev verifies leases against.
 	trustPool *x509.CertPool
 
-	keys     interface{ Close() }
-	jobs     *hostsetup.Jobs
-	registry registryWriter
-	status   statusStore
-	ca       rootStore
-	connect  connector
+	keys   interface{ Close() }
+	jobs   *hostsetup.Jobs
+	status statusStore
+	ca     rootStore
 
 	actions  map[string]actionFunc
 	provider *provider

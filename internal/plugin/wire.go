@@ -24,21 +24,23 @@ import (
 // state stores, the SSH keyring, the msbctl client) and hands each handler
 // the ports it uses.
 func NewRuntime() *Runtime {
-	r := &Runtime{dialer: &net.Dialer{}, now: time.Now, getenv: os.Getenv}
+	r := &Runtime{now: time.Now, getenv: os.Getenv}
 	host := kandev.Provider(r.Host)
 	now := func() time.Time { return r.now() }
 
 	registry := store.NewRegistry(host)
 	ca := store.NewCA(host, now)
-	r.registry, r.status, r.ca = registry, store.NewStatus(host, now), ca
+	r.status, r.ca = store.NewStatus(host, now), ca
 	policy := store.NewEgress(host)
 	secretStore := store.NewSecrets(host, now)
 	apiURL := store.NewAPIURL(host, now)
 
-	keys := sshx.NewKeyring(store.NewSSHKey(host), r.dialer)
+	// One dialer opens every SSH connection: the pool's, a scan's and setup's.
+	dialer := &net.Dialer{}
+	keys := sshx.NewKeyring(store.NewSSHKey(host), dialer)
 	r.keys = keys
-	hostKeys := sshx.HostKeys{Dialer: r.dialer}
-	r.connect = func(ctx context.Context) (*msbctl.Client, error) {
+	hostKeys := sshx.HostKeys{Dialer: dialer}
+	connect := func(ctx context.Context) (*msbctl.Client, error) {
 		pool, err := keys.Pool(ctx)
 		if err != nil {
 			return nil, err
@@ -51,41 +53,41 @@ func NewRuntime() *Runtime {
 		Roots: r.ca, Egress: policy, Trusted: trusted, Now: now,
 		PublicKey: func(ctx context.Context) string { key, _ := keys.PublicKey(ctx); return key },
 	}
-	tester := &statusTester{connect: r.connect, checker: checker, status: r.status}
+	tester := &statusTester{connect: connect, checker: checker, status: r.status}
 	scope := &rootScope{roots: r.ca}
 	r.jobs = hostsetup.NewJobs(now)
 	manager := &hostsetup.Manager{
-		Jobs: r.jobs, Registry: r.registry, Test: tester.Test,
+		Jobs: r.jobs, Registry: registry, Test: tester.Test,
 		Dial: func(ctx context.Context, dest, hostKey string, auth remote.AdminAuth) (hostsetup.Session, error) {
-			return sshx.DialAdmin(ctx, r.dialer, dest, hostKey, auth)
+			return sshx.DialAdmin(ctx, dialer, dest, hostKey, auth)
 		},
-		Connect: func(ctx context.Context) (hostsetup.HostAPI, error) { return r.connect(ctx) },
+		Connect: func(ctx context.Context) (hostsetup.HostAPI, error) { return connect(ctx) },
 	}
 
 	r.maintainer = maintainer{
-		registry: r.registry, connect: r.connect, checker: checker, record: r.status,
+		registry: registry, connect: connect, checker: checker, record: r.status,
 		maintFirst: maintainFirst, maintEvery: maintainEvery,
 	}
 	r.provider = &provider{
-		host: host, connect: r.connect, registry: r.registry, policy: policy, secrets: secretStore,
+		host: host, connect: connect, registry: registry, policy: policy, secrets: secretStore,
 		status: r.status, apiURL: apiURL, healer: checker, now: now,
 	}
 	r.actions = merge(
 		(&hostActions{
-			registry: r.registry, status: r.status, keys: keys, connect: r.connect, tester: tester, scope: scope,
-			healer: &healAfterWrite{connect: r.connect, checker: checker}, hostKeys: hostKeys,
+			registry: registry, status: r.status, keys: keys, connect: connect, tester: tester, scope: scope,
+			healer: &healAfterWrite{connect: connect, checker: checker}, hostKeys: hostKeys,
 		}).routes(),
 		(&caActions{roots: r.ca, trusted: trusted}).routes(),
 		(&secretActions{secrets: secretStore}).routes(),
 		(&egressActions{policy: policy}).routes(),
-		(&jobActions{manager: manager, jobs: r.jobs, registry: r.registry, keys: keys, connect: r.connect, scope: scope, hostKeys: hostKeys}).routes(),
+		(&jobActions{manager: manager, jobs: r.jobs, registry: registry, keys: keys, connect: connect, scope: scope, hostKeys: hostKeys}).routes(),
 		(&readinessAction{report: readiness.Report{
 			Root: ca.Root, Trusted: trusted, Getenv: func(name string) string { return r.getenv(name) },
 			SeenAPI: func(ctx context.Context) (string, string, error) {
 				seen, err := apiURL.Load(ctx)
 				return seen.URL, seen.SeenAt, err
 			},
-			Registry: func(ctx context.Context) (hosts.Registry, error) { return r.registry.Load(ctx) },
+			Registry: func(ctx context.Context) (hosts.Registry, error) { return registry.Load(ctx) },
 			Status:   func(ctx context.Context) (map[string]hostcheck.Status, error) { return r.status.Load(ctx) },
 		}}).routes(),
 	)

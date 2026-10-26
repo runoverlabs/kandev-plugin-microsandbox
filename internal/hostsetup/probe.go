@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -96,10 +95,7 @@ func (r *run) planResult() {
 		r.result.KandevAddress = sshConn[0]
 	}
 	r.result.BaseURL = cmp.Or(r.in.BaseURL, "https://"+bracket(r.in.SSHHost))
-	r.result.SSH = r.account + "@" + bracket(r.in.SSHHost)
-	if r.in.SSHPort != 0 && r.in.SSHPort != 22 {
-		r.result.SSH = r.account + "@" + net.JoinHostPort(r.in.SSHHost, strconv.Itoa(r.in.SSHPort))
-	}
+	r.result.SSH = r.account + "@" + bracketHost(r.in.SSHHost, r.in.SSHPort)
 }
 
 func (r *run) probeDetail() string {

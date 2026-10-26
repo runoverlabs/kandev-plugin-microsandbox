@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -126,13 +127,10 @@ func (p Plan) SameMachine(existing hosts.Host) bool {
 }
 
 func bracketHost(host string, port int) string {
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
 	if port != 0 && port != 22 {
-		return host + ":" + strconv.Itoa(port)
+		return net.JoinHostPort(host, strconv.Itoa(port))
 	}
-	return host
+	return bracket(host)
 }
 
 func plannedSteps() []Step {
