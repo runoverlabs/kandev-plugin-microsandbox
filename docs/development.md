@@ -72,9 +72,10 @@ the rules that enforce it are in [architecture.md](architecture.md).
 | `assets/` | `icon.svg`, the manifest's icon: a 16×16 dot grid in the style of the forgejo plugin's and msb-manager's. |
 
 The UI resolves `@kandev/plugin-sdk` from the sibling checkout, like the Go
-module. `npm install` hits an npm resolver bug on that linked package
-(`Cannot read properties of null (reading 'edgesOut')`); `npm ci` from the
-committed lockfile works.
+module. npm 10's `npm install` hits a resolver bug on that linked package
+(`Cannot read properties of null (reading 'edgesOut')`) when it adds or
+changes a dependency; npm 11 does not (`npx npm@11 install ...` where the
+system npm is 10). `npm ci` from the committed lockfile works with either.
 
 Tests never need a real host: the plugin and transport tests run real SSH
 against `sshtest` servers on loopback, answering scripted `msbctl kandev`
