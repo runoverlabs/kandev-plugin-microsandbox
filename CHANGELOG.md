@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.0
+
+A broken root certificate is now reported and can be replaced, host setup
+jobs survive a failed poll, and the plugin's internals are rebuilt as
+layers with enforced complexity limits. Host requirements are unchanged
+from 0.1.1.
+
 - A root certificate that exists but cannot be used, such as one whose key
   is gone from the secret store, is reported instead of being read as "no
   root yet": Test reports `root_unusable`, `hosts.add` and `hosts.update`
@@ -18,8 +25,8 @@
 - The "add a host that is already set up" form no longer pins a host key
   scanned for one SSH destination after the destination was edited.
 - A failure to read the plugin's SSH key, or the hosts' last check results,
-  is no longer reported as the host registry's, and an admin login refused during setup is no longer logged
-  as the plugin's key being refused.
+  is no longer reported as the host registry's, and an admin login refused
+  during setup is no longer logged as the plugin's key being refused.
 - The maintainer no longer connects, or creates the plugin's SSH key, when
   no host is registered.
 

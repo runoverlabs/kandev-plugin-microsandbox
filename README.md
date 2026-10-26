@@ -15,7 +15,7 @@ reach. Each host is an ordinary [msb-manager](https://github.com/runoverlabs/san
 install, driven over SSH through a restricted forced command
 (`msbctl host serve --kandev`). No daemon, port or token scheme of its own.
 
-> **Status: 0.1.1.** The provider's whole lifecycle
+> **Status: 0.2.0.** The provider's whole lifecycle
 > (provision, connect, inspect, recover, attach, destroy), the host registry
 > with setup and upgrades, the root certificate, central egress and secrets,
 > and the settings pages are built. Whole agent sessions have run against
