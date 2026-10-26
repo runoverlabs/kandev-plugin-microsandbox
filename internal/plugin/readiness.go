@@ -24,7 +24,7 @@ func (a *readinessAction) status(ctx context.Context, body []byte) kandev.Respon
 	}
 	items, ready, err := a.report.Items(ctx)
 	if err != nil {
-		return kandev.Internal(ActionSetupStatus, registryWhat, err)
+		return kandev.Internal(ActionSetupStatus, "the plugin's settings", err)
 	}
 	return kandev.OK(map[string]any{"ready": ready, "items": items})
 }

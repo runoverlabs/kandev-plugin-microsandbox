@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEgressPage } from "../src/egress";
+import { createAddExistingForm } from "../src/host-forms";
 import { createHostRow } from "../src/host-row";
 import type { HostView } from "../src/model";
 
@@ -121,5 +122,24 @@ describe("egress page", () => {
     expect(text(builtin)).not.toContain("Edit");
     expect(text(custom)).toContain("Edit");
     expect(text(custom)).toContain("192.168.2.6:8788");
+  });
+});
+
+describe("add existing host form", () => {
+  // AddExistingForm's state, in order: dest, name, base URL, labels, then
+  // useScan's scanned and confirmed.
+  const form = (dest: string) =>
+    render(createAddExistingForm(stubHost([dest, "sbx-02", "", "default", { dest: "msb@sbx-01", key: "ssh-ed25519 AAAA", fingerprint: "SHA256:abc" }, true])), {
+      authorize: "msbctl host authorize",
+      onDone: () => undefined,
+      onCancel: () => undefined,
+    });
+
+  it("adds with the host key confirmed for this destination", () => {
+    expect(find(form("msb@sbx-01"), "add-host")?.props.disabled).toBe(false);
+  });
+
+  it("refuses a host key scanned for another destination", () => {
+    expect(find(form("msb@sbx-02"), "add-host")?.props.disabled).toBe(true);
   });
 });

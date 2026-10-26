@@ -93,16 +93,22 @@ func OutsideRoot(root *pki.Root, h hosts.Host) string {
 
 // HealNow gives a newly added or changed host a certificate, best effort:
 // the host is saved either way, and the maintainer retries. tried is false
-// when there is no root to issue from yet, or no way to reach hosts. It
-// connects only once there is a root, so a write before the CA exists never
-// loads, or generates, the plugin's key.
+// when there is no root to issue from yet. It connects only once there is a
+// root, so a write before the CA exists never loads, or generates, the
+// plugin's key.
 func (c *Checker) HealNow(ctx context.Context, connect func(context.Context) (Host, error), h hosts.Host) (outcome TLSOutcome, tried bool) {
-	if _, err := c.Roots.Root(ctx); err != nil {
+	_, err := c.Roots.Root(ctx)
+	if errors.Is(err, pki.ErrNoRoot) {
 		return TLSOutcome{}, false
+	}
+	if err != nil {
+		log.Printf("tls %s: %v", h.Name, err)
+		return TLSOutcome{State: TLSFailed, Reason: msbctl.CodeUnavailable}, true
 	}
 	api, err := connect(ctx)
 	if err != nil {
-		return TLSOutcome{}, false
+		log.Printf("tls %s: %v", h.Name, err)
+		return TLSOutcome{State: TLSFailed, Reason: msbctl.CodeUnavailable}, true
 	}
 	health, err := api.Health(ctx, h)
 	if err != nil {

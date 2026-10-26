@@ -360,3 +360,20 @@ func TestTestReportsTheHealedStateNotTheStaleOne(t *testing.T) {
 	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, true, body["health"].(map[string]any)["serve"].(map[string]any)["ok"])
 }
+
+// A root that exists but cannot be loaded is a failure to report, not the
+// "no root yet" that skips certificate care.
+func TestBrokenRootIsReportedNotSkipped(t *testing.T) {
+	host := newFakeHost()
+	require.Equal(t, 201, first(call(t, newRuntime(t, host), ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
+	require.NoError(t, host.DeleteSecret(t.Context(), caKeySecret))
+	r := newRuntime(t, host)
+
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	require.Equal(t, 201, status, body)
+	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
+
+	status, body = call(t, r, ActionSetupStatus, nil)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, "the plugin's settings could not be read or saved", body["error"])
+}

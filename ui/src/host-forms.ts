@@ -173,7 +173,7 @@ export function createAddExistingForm(host: PluginHostApi): Component<{ authoriz
       k.h(
         "div",
         { className: "msb-row" },
-        k.button("Add", () => void add(), { variant: "default", disabled: !s.confirmed || !name.trim() || m.busy !== null }),
+        k.button("Add", () => void add(), { variant: "default", disabled: !s.confirmed || s.scanned?.dest !== dest || !name.trim() || m.busy !== null, testId: "add-host" }),
         k.button("Cancel", props.onCancel, { variant: "ghost" }),
       ),
     );
