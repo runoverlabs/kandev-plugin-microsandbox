@@ -26,29 +26,37 @@ function text(value: unknown): string {
  */
 export function toActionError(cause: unknown): ActionError {
   if (cause instanceof ActionError) return cause;
-  const status = typeof (cause as { status?: unknown })?.status === "number" ? (cause as { status: number }).status : 0;
+  const status = statusOf(cause);
   const body = (cause as { body?: unknown })?.body;
+  const isObject = body !== null && typeof body === "object";
+  const message = isObject ? text((body as { error?: unknown }).error) : "";
+  const fields = isObject ? fieldsOf((body as { fields?: unknown }).fields) : {};
+  return new ActionError(message || fallbackMessage(status), status, fields);
+}
+
+function statusOf(cause: unknown): number {
+  const status = (cause as { status?: unknown })?.status;
+  return typeof status === "number" ? status : 0;
+}
+
+/** Field errors, from a map or a list of `{field, message}`. */
+function fieldsOf(raw: unknown): Record<string, string> {
   const fields: Record<string, string> = {};
-  let message = "";
-  if (body && typeof body === "object") {
-    message = text((body as { error?: unknown }).error);
-    const raw = (body as { fields?: unknown }).fields;
-    if (Array.isArray(raw)) {
-      for (const item of raw) {
-        const field = text((item as { field?: unknown })?.field);
-        if (field) fields[field] = text((item as { message?: unknown })?.message);
-      }
-    } else if (raw && typeof raw === "object") {
-      for (const [field, value] of Object.entries(raw)) fields[field] = text(value);
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const field = text((item as { field?: unknown })?.field);
+      if (field) fields[field] = text((item as { message?: unknown })?.message);
     }
+  } else if (raw && typeof raw === "object") {
+    for (const [field, value] of Object.entries(raw)) fields[field] = text(value);
   }
-  if (!message) {
-    message =
-      status === 504
-        ? "The plugin did not answer in time. Try again."
-        : "Could not reach the microsandbox plugin. Check the Kandev server logs.";
-  }
-  return new ActionError(message, status, fields);
+  return fields;
+}
+
+function fallbackMessage(status: number): string {
+  return status === 504
+    ? "The plugin did not answer in time. Try again."
+    : "Could not reach the microsandbox plugin. Check the Kandev server logs.";
 }
 
 /** The workspace an action is scoped to: every action here is plugin-wide, but Kandev requires one. */
