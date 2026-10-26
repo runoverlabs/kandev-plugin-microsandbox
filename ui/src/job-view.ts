@@ -20,24 +20,32 @@ export function createJobView(host: PluginHostApi): Component<JobViewProps> {
   return function JobView(props: JobViewProps) {
     const [job, setJob] = host.React.useState<SetupJob>(props.job);
     const [error, setError] = host.React.useState<ActionError | null>(null);
+    // A failed poll schedules the next one, so a plugin restart or a slow
+    // answer does not leave a running job looking stuck.
+    const [failures, setFailures] = host.React.useState(0);
     host.React.useEffect(() => {
       if (job.state !== "running") return;
       const controller = new AbortController();
       const timer = window.setTimeout(() => {
         invoke<SetupJob>(host, "hosts.setup.status", { id: job.id }, controller.signal)
           .then((next) => {
+            setError(null);
             setJob(next);
             if (next.state !== "running") props.onFinished();
           })
           .catch((cause: unknown) => {
-            if (!controller.signal.aborted) setError(toActionError(cause));
+            if (controller.signal.aborted) return;
+            const failure = toActionError(cause);
+            setError(failure);
+            // A 404 is a job the plugin has forgotten: polling cannot bring it back.
+            if (failure.status !== 404) setFailures((n) => n + 1);
           });
       }, POLL_MS);
       return () => {
         window.clearTimeout(timer);
         controller.abort();
       };
-    }, [job]);
+    }, [job, failures]);
     return k.card(
       props.title,
       job.state === "running" ? "Running. This can take a few minutes." : job.state === "done" ? "Done." : "Stopped. Fix what the failed step says, then run it again: every step is safe to repeat.",
