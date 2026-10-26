@@ -1,5 +1,5 @@
 import type { Component, PluginHostApi } from "@kandev/plugin-sdk";
-import { kit, useLoad, useMutation } from "./common";
+import { kit, useLoad, useMutation, type Node } from "./common";
 import type { EgressGroup, EgressView } from "./model";
 
 /**
@@ -8,42 +8,7 @@ import type { EgressGroup, EgressView } from "./model";
  */
 export function createEgressPage(host: PluginHostApi): Component {
   const k = kit(host);
-
-  function Editor(props: { group: EgressGroup | null; onSaved(): void; onCancel(): void }) {
-    const [name, setName] = host.React.useState(props.group?.name ?? "");
-    const [description, setDescription] = host.React.useState(props.group?.description ?? "");
-    const [entries, setEntries] = host.React.useState<string[]>(props.group?.entries.length ? [...props.group.entries] : [""]);
-    const m = useMutation(host);
-    const save = async () => {
-      const res = await m.run("save", "egress.put", {
-        name: name.trim(), description: description.trim(), entries: entries.map((e) => e.trim()).filter((e) => e !== ""),
-      });
-      if (res) props.onSaved();
-    };
-    return k.card(
-      props.group ? `Edit ${props.group.name}` : "New egress group",
-      "Each entry is a host (HTTPS), *.suffix (HTTPS), host:port, an address or address:port.",
-      props.group ? null : k.field("Name", k.input(name, setName, { placeholder: "lan-llm", testId: "group-name" }), "Lowercase letters, digits and dashes."),
-      k.field("Description", k.input(description, setDescription)),
-      k.h("span", { className: "msb-field__label" }, "Entries"),
-      ...entries.map((entry, i) =>
-        k.h(
-          "div",
-          { key: i, className: "msb-row" },
-          k.input(entry, (v) => setEntries(entries.map((e, j) => (j === i ? v : e))), { placeholder: "192.168.2.6:8788", mono: true, testId: `entry-${i}` }),
-          k.button("Remove", () => setEntries(entries.length > 1 ? entries.filter((_, j) => j !== i) : [""]), { variant: "ghost" }),
-        ),
-      ),
-      k.h("div", { className: "msb-row" }, k.button("Add entry", () => setEntries([...entries, ""]), { testId: "add-entry" })),
-      k.error(m.error),
-      k.h(
-        "div",
-        { className: "msb-row" },
-        k.button("Save", () => void save(), { variant: "default", disabled: m.busy !== null, testId: "save-group" }),
-        k.button("Cancel", props.onCancel, { variant: "ghost" }),
-      ),
-    );
-  }
+  const Editor = createEgressEditor(host);
 
   return function MicrosandboxEgressPage() {
     const view = useLoad<EgressView>(host, "egress.list");
@@ -78,37 +43,7 @@ export function createEgressPage(host: PluginHostApi): Component {
           k.h(
             host.ui.TableBody as unknown,
             null,
-            ...groups.map((g) =>
-              k.h(
-                host.ui.TableRow as unknown,
-                { key: g.name, "data-testid": `group-${g.name}` },
-                k.h(
-                  host.ui.TableCell as unknown,
-                  null,
-                  k.h("input", { type: "checkbox", checked: g.default, disabled: m.busy !== null, onChange: () => void toggleDefault(g), "aria-label": `${g.name} is a default` }),
-                ),
-                k.h(
-                  host.ui.TableCell as unknown,
-                  null,
-                  k.h("strong", null, g.name),
-                  g.builtin ? k.h("span", { className: "msb-muted" }, " built-in") : null,
-                  g.description ? k.h("div", { className: "msb-muted" }, g.description) : null,
-                ),
-                k.h(host.ui.TableCell as unknown, { className: "msb-mono" }, g.entries.join(", ")),
-                k.h(
-                  host.ui.TableCell as unknown,
-                  null,
-                  g.builtin
-                    ? null
-                    : k.h(
-                        "span",
-                        { className: "msb-row" },
-                        k.button("Edit", () => setEditing(g)),
-                        k.button("Delete", () => void remove(g), { variant: "ghost" }),
-                      ),
-                ),
-              ),
-            ),
+            ...groups.map((g) => groupRow(k, host, g, { busy: m.busy !== null, toggleDefault, remove, edit: () => setEditing(g) })),
           ),
         ),
         k.h("div", { className: "msb-row" }, k.button("New group", () => setEditing("new"), { testId: "new-group" })),
@@ -124,6 +59,92 @@ export function createEgressPage(host: PluginHostApi): Component {
             onCancel: () => setEditing(null),
           })
         : null,
+    );
+  };
+}
+
+interface GroupActions {
+  busy: boolean;
+  toggleDefault(g: EgressGroup): Promise<void>;
+  remove(g: EgressGroup): Promise<void>;
+  edit(): void;
+}
+
+/** One group in the table: whether it is a default, what it is, its entries. */
+function groupRow(k: ReturnType<typeof kit>, host: PluginHostApi, g: EgressGroup, actions: GroupActions): Node {
+  return k.h(
+    host.ui.TableRow as unknown,
+    { key: g.name, "data-testid": `group-${g.name}` },
+    k.h(
+      host.ui.TableCell as unknown,
+      null,
+      k.h("input", { type: "checkbox", checked: g.default, disabled: actions.busy, onChange: () => void actions.toggleDefault(g), "aria-label": `${g.name} is a default` }),
+    ),
+    k.h(
+      host.ui.TableCell as unknown,
+      null,
+      k.h("strong", null, g.name),
+      g.builtin ? k.h("span", { className: "msb-muted" }, " built-in") : null,
+      g.description ? k.h("div", { className: "msb-muted" }, g.description) : null,
+    ),
+    k.h(host.ui.TableCell as unknown, { className: "msb-mono" }, g.entries.join(", ")),
+    k.h(
+      host.ui.TableCell as unknown,
+      null,
+      g.builtin
+        ? null
+        : k.h(
+            "span",
+            { className: "msb-row" },
+            k.button("Edit", actions.edit),
+            k.button("Delete", () => void actions.remove(g), { variant: "ghost" }),
+          ),
+    ),
+  );
+}
+
+interface EditorProps {
+  group: EgressGroup | null;
+  onSaved(): void;
+  onCancel(): void;
+}
+
+/** Creates or edits a custom group. */
+function createEgressEditor(host: PluginHostApi): Component<EditorProps> {
+  const k = kit(host);
+  return function Editor(props: EditorProps) {
+    const [name, setName] = host.React.useState(props.group?.name ?? "");
+    const [description, setDescription] = host.React.useState(props.group?.description ?? "");
+    const [entries, setEntries] = host.React.useState<string[]>(props.group?.entries.length ? [...props.group.entries] : [""]);
+    const m = useMutation(host);
+    const save = async () => {
+      const res = await m.run("save", "egress.put", {
+        name: name.trim(), description: description.trim(), entries: entries.map((e) => e.trim()).filter((e) => e !== ""),
+      });
+      if (res) props.onSaved();
+    };
+    return k.card(
+      props.group ? `Edit ${props.group.name}` : "New egress group",
+      "Each entry is a host (HTTPS), *.suffix (HTTPS), host:port, an address or address:port.",
+      props.group ? null : k.field("Name", k.input(name, setName, { placeholder: "lan-llm", testId: "group-name" }), "Lowercase letters, digits and dashes."),
+      k.field("Description", k.input(description, setDescription)),
+      k.h("span", { className: "msb-field__label" }, "Entries"),
+      ...entries.map((entry, i) =>
+        k.h(
+          "div",
+          { key: i, className: "msb-row" },
+          k.input(entry, (v) => setEntries(entries.map((e, j) => (j === i ? v : e))), { placeholder: "192.168.2.6:8788", mono: true, testId: `entry-${i}` }),
+          k.button("Remove", () => setEntries(entries.length > 1 ? entries.filter((_, j) => j !== i) : [""]), { variant: "ghost" }),
+        ),
+      ),
+      k.h("div", { className: "msb-row" }, k.button("Add entry", () => setEntries([...entries, ""]), { testId: "add-entry" })),
+      k.error(m.error),
+      k.h(
+        "div",
+        { className: "msb-row" },
+        k.button("Save", () => void save(), { variant: "default", disabled: m.busy !== null, testId: "save-group" }),
+        k.button("Cancel", props.onCancel, { variant: "ghost" }),
+      ),
     );
   };
 }

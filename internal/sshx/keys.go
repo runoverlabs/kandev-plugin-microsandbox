@@ -127,3 +127,24 @@ func ScanHostKey(ctx context.Context, dest string, dialer Dialer) (string, error
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(captured))), nil
 }
+
+// HostKeys is host key handling for the operator's pages: scanning the key a
+// host presents, checking a key line, and its fingerprint.
+type HostKeys struct{ Dialer Dialer }
+
+// Scan returns the key dest presents.
+func (k HostKeys) Scan(ctx context.Context, dest string) (string, error) {
+	return ScanHostKey(ctx, dest, k.Dialer)
+}
+
+// Check reports whether line is a usable host key.
+func (HostKeys) Check(line string) error {
+	_, err := ParseHostKey(line)
+	return err
+}
+
+// Fingerprint is line's SHA256 fingerprint, or "" when it is not a key.
+func (HostKeys) Fingerprint(line string) string {
+	fingerprint, _ := Fingerprint(line)
+	return fingerprint
+}

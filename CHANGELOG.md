@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- A root certificate that exists but cannot be used, such as one whose key
+  is gone from the secret store, is reported instead of being read as "no
+  root yet": Test reports `root_unusable`, `hosts.add` and `hosts.update`
+  answer `tls` `root_unusable` for a host that terminates TLS with the
+  plugin's certificate (`not_proxy` for one that does not), `ca.get` answers
+  `usable: false` with the reason, and `setup.status` shows the `root` item as
+  `failing` rather than failing as a whole. `ca.create` with `replace` now
+  replaces it; without `replace` it answers 409. A failure to read the
+  store stays an error to retry, and never replaces the root.
+- A setup or upgrade job's view keeps following the job after a failed
+  status poll, such as during a plugin restart, instead of staying on
+  "Running" until the page is reloaded. A job the plugin no longer knows
+  ends there, with the reason, and can be run again.
+- The "add a host that is already set up" form no longer pins a host key
+  scanned for one SSH destination after the destination was edited.
+- A failure to read the plugin's SSH key, or the hosts' last check results,
+  is no longer reported as the host registry's, and an admin login refused during setup is no longer logged
+  as the plugin's key being refused.
+- The maintainer no longer connects, or creates the plugin's SSH key, when
+  no host is registered.
+
 ## 0.1.1
 
 Private names, for a sandbox that must reach a host on the LAN with a bound

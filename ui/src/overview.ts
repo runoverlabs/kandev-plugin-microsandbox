@@ -4,6 +4,8 @@ import { readinessTone, type Readiness } from "./model";
 
 interface RootView {
   exists: boolean;
+  usable?: boolean;
+  problem?: string;
   cert_pem?: string;
   sha256?: string;
   not_after?: string;

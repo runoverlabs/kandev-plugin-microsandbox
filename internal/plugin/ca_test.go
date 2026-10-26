@@ -1,12 +1,14 @@
 package plugin
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kandev-plugin-microsandbox/internal/hostcheck"
 	"kandev-plugin-microsandbox/internal/msbctl"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -115,9 +118,18 @@ func (f *caFixture) createRoot(t *testing.T) map[string]any {
 
 func (f *caFixture) trustRoot(t *testing.T) {
 	t.Helper()
-	root, err := f.r.root(t.Context())
+	root, err := f.r.ca.Root(t.Context())
 	require.NoError(t, err)
 	f.r.trustPool.AddCert(root.Cert)
+}
+
+// restart replaces the runtime with a new one on the same Kandev, as a
+// plugin restart does: nothing it had cached survives.
+func (f *caFixture) restart(t *testing.T) {
+	t.Helper()
+	f.r = newRuntime(t, f.host)
+	f.r.now = func() time.Time { return f.clock }
+	f.r.trustPool = x509.NewCertPool()
 }
 
 // addProxyHost registers a proxy-mode fake host; the name is used in its
@@ -147,8 +159,8 @@ func TestCACreateStoresTheKeyOnlyAsASecret(t *testing.T) {
 	raw, _ := json.Marshal(body)
 	assert.NotContains(t, string(raw), "PRIVATE KEY")
 
-	assert.Contains(t, f.host.secrets[caKeySecret], "PRIVATE KEY")
-	state, _ := json.Marshal(f.host.state)
+	assert.Contains(t, f.host.Secret(caKeySecret), "PRIVATE KEY")
+	state, _ := json.Marshal(f.host.State())
 	assert.NotContains(t, string(state), "PRIVATE KEY", "the root key never reaches Host state")
 
 	// A restarted plugin loads the same root.
@@ -183,13 +195,13 @@ func TestAddIssuesACertificateAndTheKeyTravelsOnStdinOnly(t *testing.T) {
 	f.createRoot(t)
 	p := newProxyHost()
 	server, body := f.addProxyHost(t, "sbx-01", p)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, "missing", body["tls"].(map[string]any)["reason"])
 
 	installed, count := p.state()
 	assert.Equal(t, 1, count)
 	assert.Equal(t, "sbx-01.tailnet.ts.net", installed.Subject)
-	root, err := f.r.root(t.Context())
+	root, err := f.r.ca.Root(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, root.Fingerprint(), installed.IssuerSHA256)
 	for _, exec := range server.Execs() {
@@ -212,7 +224,7 @@ func TestTestReportsAnUntrustedRootThenPasses(t *testing.T) {
 	f.trustRoot(t)
 	_, body = call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsOK, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSOK, body["tls"].(map[string]any)["state"])
 }
 
 func TestTestWithoutARootSaysSo(t *testing.T) {
@@ -233,7 +245,7 @@ func TestTestHealsAnExpiringCertificateBeforeReporting(t *testing.T) {
 
 	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, "expiring", body["tls"].(map[string]any)["reason"])
 	_, count := p.state()
 	assert.Equal(t, 2, count)
@@ -259,10 +271,10 @@ func TestMaintainerHealsEveryHostWithoutBeingAsked(t *testing.T) {
 	failing.mu.Unlock()
 
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["healthy"].State)
-	assert.Equal(t, tlsRenewed, outcomes["expiring"].State)
-	assert.Equal(t, tlsRenewed, outcomes["draining"].State, "draining hosts still serve sessions")
-	assert.Equal(t, tlsFailed, outcomes["failing"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["healthy"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["expiring"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["draining"].State, "draining hosts still serve sessions")
+	assert.Equal(t, hostcheck.TLSFailed, outcomes["failing"].State)
 	assert.Equal(t, "unreachable", outcomes["gone"].Reason)
 
 	// The next pass retries what failed, and leaves the rest alone.
@@ -270,8 +282,8 @@ func TestMaintainerHealsEveryHostWithoutBeingAsked(t *testing.T) {
 	failing.failInstall = false
 	failing.mu.Unlock()
 	outcomes = f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["failing"].State)
-	assert.Equal(t, tlsOK, outcomes["healthy"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["failing"].State)
+	assert.Equal(t, hostcheck.TLSOK, outcomes["healthy"].State)
 	_, installs := healthy.state()
 	assert.Equal(t, 2, installs, "a valid certificate is not re-issued")
 }
@@ -285,7 +297,7 @@ func TestMaintainerReissuesAfterTheRootIsReplaced(t *testing.T) {
 	require.Equal(t, 201, status)
 
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsRenewed, outcomes["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSRenewed, outcomes["sbx-01"].State)
 	assert.Equal(t, "other_root", outcomes["sbx-01"].Reason)
 	installed, _ := p.state()
 	assert.Equal(t, replaced["sha256"], installed.IssuerSHA256)
@@ -297,7 +309,7 @@ func TestMaintainerLeavesNonProxyHostsAndNoRootAlone(t *testing.T) {
 	server, _ := f.addProxyHost(t, "sbx-01", p)
 	// Without a root the host is still checked, for its status, but
 	// nothing is installed.
-	assert.Equal(t, tlsNoRoot, f.r.maintainHosts(t.Context())["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSNoRoot, f.r.maintainHosts(t.Context())["sbx-01"].State)
 	for _, exec := range server.Execs() {
 		assert.Equal(t, "msbctl kandev health", exec.Command, "health only")
 	}
@@ -307,7 +319,7 @@ func TestMaintainerLeavesNonProxyHostsAndNoRootAlone(t *testing.T) {
 	p.mode = "tailscale"
 	p.mu.Unlock()
 	outcomes := f.r.maintainHosts(t.Context())
-	assert.Equal(t, tlsNotProxy, outcomes["sbx-01"].State)
+	assert.Equal(t, hostcheck.TLSNotProxy, outcomes["sbx-01"].State)
 	_, installs := p.state()
 	assert.Equal(t, 0, installs)
 }
@@ -356,6 +368,73 @@ func TestTestReportsTheHealedStateNotTheStaleOne(t *testing.T) {
 
 	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, true, body["ok"], body)
-	assert.Equal(t, tlsRenewed, body["tls"].(map[string]any)["state"])
+	assert.Equal(t, hostcheck.TLSRenewed, body["tls"].(map[string]any)["state"])
 	assert.Equal(t, true, body["health"].(map[string]any)["serve"].(map[string]any)["ok"])
+}
+
+// A root that exists but cannot be used is reported as such everywhere, not
+// read as "no root yet" or blamed on a host, and replacing it is the way out.
+func TestAnUnusableRootIsReportedAndReplaceable(t *testing.T) {
+	f := newCAFixture(t)
+	f.createRoot(t)
+	f.addProxyHost(t, "sbx-01", newProxyHost())
+	require.NoError(t, f.host.DeleteSecret(t.Context(), caKeySecret))
+	f.restart(t)
+
+	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
+	assert.Equal(t, "root_unusable", body["problem"])
+
+	status, body := call(t, f.r, ActionCAGet, nil)
+	require.Equal(t, 200, status, "an unusable root is an answer, not a failure to retry")
+	assert.Equal(t, true, body["exists"])
+	assert.Equal(t, false, body["usable"])
+	assert.Contains(t, body["problem"], "key is missing")
+
+	_, body = f.addProxyHost(t, "sbx-02", newProxyHost())
+	assert.Equal(t, map[string]any{"state": "root_unusable"}, body["tls"])
+	_, body = f.addProxyHost(t, "sbx-03", &proxyHost{mode: "tailscale"})
+	assert.Equal(t, map[string]any{"state": "not_proxy"}, body["tls"], "a host that needs no certificate is not told to replace the root")
+
+	status, body = call(t, f.r, ActionSetupStatus, nil)
+	require.Equal(t, 200, status, body)
+	root := body["items"].([]any)[0].(map[string]any)
+	assert.Equal(t, "root", root["key"])
+	assert.Equal(t, "failing", root["state"])
+	assert.Len(t, body["items"], 3, "the other items are still reported")
+
+	status, body = call(t, f.r, ActionCACreate, map[string]any{"dns_suffixes": []string{"tailnet.ts.net"}})
+	assert.Equal(t, 409, status)
+	assert.Contains(t, body["error"], "replace: true")
+	require.Equal(t, 201, first(call(t, f.r, ActionCACreate, map[string]any{"dns_suffixes": []string{"tailnet.ts.net"}, "replace": true})))
+	_, body = call(t, f.r, ActionSetupStatus, nil)
+	assert.Equal(t, "untrusted", body["items"].([]any)[0].(map[string]any)["state"])
+}
+
+// caKeyOutage is a Kandev whose secret store fails to read the root's key,
+// as an outage would: the root itself is fine.
+type caKeyOutage struct{ *fakeHost }
+
+func (h caKeyOutage) GetSecret(ctx context.Context, key string) (string, bool, error) {
+	if key == caKeySecret {
+		return "", false, errors.New("secret store down")
+	}
+	return h.fakeHost.GetSecret(ctx, key)
+}
+
+// Failing to read the root says nothing about it, so nothing tells the
+// operator to replace it, and a replace does not go ahead blind.
+func TestAStoreOutageIsNotAnUnusableRoot(t *testing.T) {
+	host := newFakeHost()
+	require.Equal(t, 201, first(call(t, newRuntime(t, host), ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}})))
+	key := host.Secret(caKeySecret)
+	r := newRuntime(t, caKeyOutage{host})
+
+	assert.Equal(t, 500, first(call(t, r, ActionSetupStatus, nil)))
+	assert.Equal(t, 500, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}, "replace": true})))
+	assert.Equal(t, key, host.Secret(caKeySecret), "the root is not replaced")
+
+	server := sshtest.Start(t, pluginKey(t, r), newProxyHost().handle)
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey))
+	require.Equal(t, 201, status, body)
+	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
 }

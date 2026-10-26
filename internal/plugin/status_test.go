@@ -55,7 +55,7 @@ func TestHostListShowsTheLastCheck(t *testing.T) {
 	assert.Equal(t, "2026-10-19T13:00:00Z", listedStatus(t, r, "sbx-01")["checked_at"], "the maintainer refreshes it")
 
 	require.Equal(t, 200, first(call(t, r, ActionHostsRemove, map[string]any{"name": "sbx-01"})))
-	statuses, err := r.loadStatus(t.Context())
+	statuses, err := r.status.Load(t.Context())
 	require.NoError(t, err)
 	assert.NotContains(t, statuses, "sbx-01", "a removed host's status goes with it")
 }

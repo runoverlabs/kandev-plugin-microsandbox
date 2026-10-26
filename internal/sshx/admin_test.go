@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
+	"kandev-plugin-microsandbox/internal/remote"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
 
@@ -35,7 +36,7 @@ func TestAdminRunsCommandsWithStdinAndKeepsStderr(t *testing.T) {
 	server := sshtest.Start(t, public, func(command string, stdin []byte) sshtest.Reply {
 		return sshtest.Reply{Stdout: "ran " + command + " with " + string(stdin), Stderr: "warning: x", Status: 3}
 	})
-	admin, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("ubuntu"), server.HostKey, AdminAuth{PrivateKeyPEM: keyPEM})
+	admin, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("ubuntu"), server.HostKey, remote.AdminAuth{PrivateKeyPEM: keyPEM})
 	require.NoError(t, err)
 	defer admin.Close()
 	out, err := admin.Exec(t.Context(), "sh -s", []byte("echo hi"))
@@ -49,31 +50,31 @@ func TestAdminRunsCommandsWithStdinAndKeepsStderr(t *testing.T) {
 func TestAdminAuthMethods(t *testing.T) {
 	keyPEM, public := adminKey(t, "s3cret")
 	server := sshtest.Start(t, public, func(string, []byte) sshtest.Reply { return sshtest.Reply{} }, sshtest.WithPassword("pw-1"))
-	dial := func(auth AdminAuth) error {
+	dial := func(auth remote.AdminAuth) error {
 		admin, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("root"), server.HostKey, auth)
 		if err == nil {
 			admin.Close()
 		}
 		return err
 	}
-	assert.NoError(t, dial(AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"}))
-	assert.NoError(t, dial(AdminAuth{Password: "pw-1"}))
-	assert.ErrorIs(t, dial(AdminAuth{Password: "nope"}), ErrNotAuthorized)
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM}), ErrAdminAuth, "the passphrase is missing")
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "wrong"}), ErrAdminAuth)
-	assert.ErrorIs(t, dial(AdminAuth{PrivateKeyPEM: "not a key"}), ErrAdminAuth)
-	assert.ErrorIs(t, dial(AdminAuth{}), ErrAdminAuth)
+	assert.NoError(t, dial(remote.AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"}))
+	assert.NoError(t, dial(remote.AdminAuth{Password: "pw-1"}))
+	assert.ErrorIs(t, dial(remote.AdminAuth{Password: "nope"}), remote.ErrNotAuthorized)
+	assert.ErrorIs(t, dial(remote.AdminAuth{PrivateKeyPEM: keyPEM}), remote.ErrAdminAuth, "the passphrase is missing")
+	assert.ErrorIs(t, dial(remote.AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "wrong"}), remote.ErrAdminAuth)
+	assert.ErrorIs(t, dial(remote.AdminAuth{PrivateKeyPEM: "not a key"}), remote.ErrAdminAuth)
+	assert.ErrorIs(t, dial(remote.AdminAuth{}), remote.ErrAdminAuth)
 
 	other := sshtest.Start(t, public, func(string, []byte) sshtest.Reply { return sshtest.Reply{} })
-	_, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("root"), other.HostKey, AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"})
-	assert.ErrorIs(t, err, ErrHostKeyMismatch, "the pin is checked as for the plugin's own key")
+	_, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("root"), other.HostKey, remote.AdminAuth{PrivateKeyPEM: keyPEM, Passphrase: "s3cret"})
+	assert.ErrorIs(t, err, remote.ErrHostKeyMismatch, "the pin is checked as for the plugin's own key")
 }
 
 // The login's secrets never appear in an error.
 func TestAdminErrorsCarryNoSecret(t *testing.T) {
 	keyPEM, public := adminKey(t, "s3cret")
 	server := sshtest.Start(t, public, nil, sshtest.WithPassword("pw-1"))
-	for _, auth := range []AdminAuth{{PrivateKeyPEM: keyPEM, Passphrase: "wrong-pass"}, {Password: "wrong-password"}} {
+	for _, auth := range []remote.AdminAuth{{PrivateKeyPEM: keyPEM, Passphrase: "wrong-pass"}, {Password: "wrong-password"}} {
 		_, err := DialAdmin(t.Context(), &net.Dialer{}, server.Dest("root"), server.HostKey, auth)
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "wrong-pass")

@@ -175,53 +175,92 @@ export function formatUptime(seconds: number | undefined): string {
   return hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`;
 }
 
+type Rows = Array<[string, string]>;
+
+/** Rows for the values that are set, in order. */
+function rowsOf(pairs: Array<[string, string | undefined]>): Rows {
+  return pairs.filter((pair): pair is [string, string] => Boolean(pair[1]));
+}
+
 /** The detail rows for one host: what it is, what it has, how it is set up. */
-export function hostDetail(h: HostView): Array<[string, string]> {
-  const health = h.status?.health;
-  const facts = health?.host;
-  const cap = health?.capacity;
-  const rows: Array<[string, string]> = [
+export function hostDetail(h: HostView): Rows {
+  const rows: Rows = [
     ["SSH", h.ssh],
     ["Base URL", h.base_url],
     ["Labels", h.labels.length ? h.labels.join(", ") : "none"],
     ["Host key", h.fingerprint],
   ];
+  const health = h.status?.health;
   if (!health) return rows;
-  const push = (label: string, value: string | undefined) => {
-    if (value) rows.push([label, value]);
-  };
-  push("msbctl", health.msbctl_version);
-  push("msb", health.msb_version);
-  push("OS", facts?.os);
-  push("Kernel", facts?.kernel);
-  push("Platform", health.platform);
-  if (facts?.cpus !== undefined) push("CPUs", `${facts.cpus}${facts.load_1m !== undefined ? `, load ${facts.load_1m.toFixed(2)}` : ""}`);
-  if (facts?.memory_total_mib !== undefined) {
-    push("Memory", `${formatMiB(facts.memory_available_mib)} free of ${formatMiB(facts.memory_total_mib)}`);
-  }
-  if (facts?.disk_total_gib !== undefined) {
-    push("Disk", `${formatGiB(facts.disk_free_gib)} free of ${formatGiB(facts.disk_total_gib)}`);
-  }
-  push("Uptime", formatUptime(facts?.uptime_seconds));
-  if (cap) {
-    push(
-      "Kandev sandboxes",
-      `${cap.sandboxes ?? 0} of ${cap.max_sandboxes ?? "?"}, ${cap.cpus ?? 0} of ${cap.max_cpus ?? "?"} CPUs, ` +
-        `${formatMiB(cap.memory_mib ?? 0)} of ${formatMiB(cap.max_memory_mib)}`,
-    );
-  }
-  push("KVM", health.kvm === undefined ? undefined : health.kvm ? "usable" : "not usable");
-  if (health.serve) {
-    push(
-      "Data path",
-      `${health.serve.mode ?? "?"}${health.serve.listen ? ` on ${health.serve.listen}` : ""}, ${health.serve.ok ? "up" : "down"}` +
-        (proxyStale(h) ? `, proxy on ${health.serve.version || "an older release"}` : ""),
-    );
-  }
-  if (health.tls?.installed) push("Certificate", `${health.tls.subject ?? ""}, until ${health.tls.not_after ?? "?"}`);
-  if (health.egress) push("allow_extra", health.egress.allow_extra?.length ? health.egress.allow_extra.join(", ") : "[] (nothing extra)");
-  push("Last checked", h.status?.checked_at);
-  return rows;
+  return [...rows, ...softwareRows(health), ...resourceRows(health), ...setupRows(h, health), ...rowsOf([["Last checked", h.status?.checked_at]])];
+}
+
+function softwareRows(health: Health): Rows {
+  const facts = health.host;
+  return rowsOf([
+    ["msbctl", health.msbctl_version],
+    ["msb", health.msb_version],
+    ["OS", facts?.os],
+    ["Kernel", facts?.kernel],
+    ["Platform", health.platform],
+  ]);
+}
+
+function resourceRows(health: Health): Rows {
+  const facts = health.host;
+  return rowsOf([
+    ["CPUs", facts && cpusText(facts)],
+    ["Memory", facts && memoryText(facts)],
+    ["Disk", facts && diskText(facts)],
+    ["Uptime", formatUptime(facts?.uptime_seconds)],
+    ["Kandev sandboxes", health.capacity && sandboxesText(health.capacity)],
+  ]);
+}
+
+type Facts = NonNullable<Health["host"]>;
+type Capacity = NonNullable<Health["capacity"]>;
+type Serve = NonNullable<Health["serve"]>;
+type TLS = NonNullable<Health["tls"]>;
+
+function cpusText(facts: Facts): string | undefined {
+  if (facts.cpus === undefined) return undefined;
+  return facts.load_1m === undefined ? `${facts.cpus}` : `${facts.cpus}, load ${facts.load_1m.toFixed(2)}`;
+}
+
+function memoryText(facts: Facts): string | undefined {
+  if (facts.memory_total_mib === undefined) return undefined;
+  return `${formatMiB(facts.memory_available_mib)} free of ${formatMiB(facts.memory_total_mib)}`;
+}
+
+function diskText(facts: Facts): string | undefined {
+  if (facts.disk_total_gib === undefined) return undefined;
+  return `${formatGiB(facts.disk_free_gib)} free of ${formatGiB(facts.disk_total_gib)}`;
+}
+
+function sandboxesText(cap: Capacity): string {
+  return (
+    `${cap.sandboxes ?? 0} of ${cap.max_sandboxes ?? "?"}, ${cap.cpus ?? 0} of ${cap.max_cpus ?? "?"} CPUs, ` +
+    `${formatMiB(cap.memory_mib ?? 0)} of ${formatMiB(cap.max_memory_mib)}`
+  );
+}
+
+function setupRows(h: HostView, health: Health): Rows {
+  return rowsOf([
+    ["KVM", health.kvm === undefined ? undefined : health.kvm ? "usable" : "not usable"],
+    ["Data path", health.serve && dataPathText(h, health.serve)],
+    ["Certificate", health.tls?.installed ? certificateText(health.tls) : undefined],
+    ["allow_extra", health.egress && (health.egress.allow_extra?.length ? health.egress.allow_extra.join(", ") : "[] (nothing extra)")],
+  ]);
+}
+
+function dataPathText(h: HostView, serve: Serve): string {
+  const where = serve.listen ? ` on ${serve.listen}` : "";
+  const stale = proxyStale(h) ? `, proxy on ${serve.version || "an older release"}` : "";
+  return `${serve.mode ?? "?"}${where}, ${serve.ok ? "up" : "down"}${stale}`;
+}
+
+function certificateText(tls: TLS): string {
+  return `${tls.subject ?? ""}, until ${tls.not_after ?? "?"}`;
 }
 
 /** Splits a list typed with commas or newlines, trimmed, empty items dropped. */

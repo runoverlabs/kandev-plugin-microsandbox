@@ -2,20 +2,14 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 
 	"kandev-plugin-microsandbox/internal/egress"
+	"kandev-plugin-microsandbox/internal/kandev"
 )
-
-// The plugin-wide egress policy: named groups of destinations, and the
-// groups every sandbox gets. Kept in Host state, like the host registry, so
-// one admin change reaches every new sandbox on every host.
-const egressStateKey = "egress"
 
 // Egress action keys, matching manifest.yaml.
 const (
@@ -25,71 +19,20 @@ const (
 	ActionEgressDefaults = "egress.defaults"
 )
 
-func (r *Runtime) loadEgress(ctx context.Context) (egress.Policy, error) {
-	h, err := r.host()
-	if err != nil {
-		return egress.Policy{}, err
-	}
-	value, found, err := h.GetState(ctx, stateScope, "", egressStateKey)
-	if err != nil {
-		return egress.Policy{}, fmt.Errorf("read egress policy: %w", err)
-	}
-	if !found {
-		return egress.Policy{Version: egress.PolicyVersion}, nil
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return egress.Policy{}, errors.New("egress policy is unreadable")
-	}
-	var policy egress.Policy
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return egress.Policy{}, errors.New("egress policy is unreadable")
-	}
-	if err := policy.Check(); err != nil {
-		return egress.Policy{}, err
-	}
-	return policy, nil
+// policyStore changes the egress policy under its lock.
+type policyStore interface {
+	policyReader
+	Mutate(ctx context.Context, change func(egress.Policy) (egress.Policy, error)) (egress.Policy, error)
 }
 
-// mutateEgress applies change to the stored policy under the registry lock,
-// which also serializes egress edits against each other.
-func (r *Runtime) mutateEgress(ctx context.Context, change func(egress.Policy) (egress.Policy, error)) (egress.Policy, error) {
-	r.registryMu.Lock()
-	defer r.registryMu.Unlock()
-	policy, err := r.loadEgress(ctx)
-	if err != nil {
-		return egress.Policy{}, err
+// egressActions serve the Egress page. A change applies to sandboxes
+// provisioned from then on; existing ones keep the rules they were made with.
+type egressActions struct{ policy policyStore }
+
+func (a *egressActions) routes() map[string]actionFunc {
+	return map[string]actionFunc{
+		ActionEgressList: a.list, ActionEgressPut: a.put, ActionEgressRemove: a.remove, ActionEgressDefaults: a.defaults,
 	}
-	next, err := change(policy)
-	if err != nil {
-		return egress.Policy{}, err
-	}
-	next.Version = egress.PolicyVersion
-	if next.Groups == nil {
-		next.Groups = []egress.Group{}
-	}
-	if next.Defaults == nil {
-		next.Defaults = []string{}
-	}
-	if err := next.Check(); err != nil {
-		return egress.Policy{}, err
-	}
-	raw, err := json.Marshal(next)
-	if err != nil {
-		return egress.Policy{}, err
-	}
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return egress.Policy{}, err
-	}
-	h, err := r.host()
-	if err != nil {
-		return egress.Policy{}, err
-	}
-	if err := h.SetState(ctx, stateScope, "", egressStateKey, value); err != nil {
-		return egress.Policy{}, fmt.Errorf("write egress policy: %w", err)
-	}
-	return next, nil
 }
 
 // egressView is the policy as the admin sees it: every group, built-in ones
@@ -116,41 +59,36 @@ func viewEgress(p egress.Policy) egressView {
 }
 
 // egressFailure turns a policy error into a response the admin can act on.
-func egressFailure(action string, err error) response {
-	switch {
-	case errors.Is(err, egress.ErrEntry), errors.Is(err, egress.ErrPolicy), errors.Is(err, egress.ErrUnknown):
-		return fail(http.StatusUnprocessableEntity, err.Error())
-	case errors.Is(err, ErrNoHost):
-		return fail(http.StatusServiceUnavailable, "the plugin is still starting; try again")
+func egressFailure(action string, err error) kandev.Response {
+	if errors.Is(err, egress.ErrEntry) || errors.Is(err, egress.ErrPolicy) || errors.Is(err, egress.ErrUnknown) {
+		return kandev.Fail(http.StatusUnprocessableEntity, err.Error())
 	}
-	log.Printf("%s: %v", action, err)
-	return fail(http.StatusInternalServerError, "the egress policy could not be read or saved")
+	return kandev.Internal(action, "the egress policy", err)
 }
 
-func (r *Runtime) actionEgressList(ctx context.Context, body []byte) response {
-	if err := decode(body, &struct{}{}); err != nil {
-		return fail(http.StatusUnprocessableEntity, "this action takes no fields")
+func (a *egressActions) list(ctx context.Context, body []byte) kandev.Response {
+	if err := kandev.Decode(body, &struct{}{}); err != nil {
+		return kandev.Fail(http.StatusUnprocessableEntity, "this action takes no fields")
 	}
-	policy, err := r.loadEgress(ctx)
+	policy, err := a.policy.Load(ctx)
 	if err != nil {
 		return egressFailure(ActionEgressList, err)
 	}
-	return ok(viewEgress(policy))
+	return kandev.OK(viewEgress(policy))
 }
 
-// actionEgressPut creates or replaces a custom group. It applies to sandboxes
-// provisioned from now on; existing ones keep the rules they were made with.
-func (r *Runtime) actionEgressPut(ctx context.Context, body []byte) response {
+// put creates or replaces a custom group.
+func (a *egressActions) put(ctx context.Context, body []byte) kandev.Response {
 	var in egress.Group
-	if err := decode(body, &in); err != nil || in.Builtin {
-		return fail(http.StatusUnprocessableEntity, `expected {"name": "...", "description": "...", "entries": ["host", "host:port", "address:port"]}`)
+	if err := kandev.Decode(body, &in); err != nil || in.Builtin {
+		return kandev.Fail(http.StatusUnprocessableEntity, `expected {"name": "...", "description": "...", "entries": ["host", "host:port", "address:port"]}`)
 	}
 	group, err := egress.CheckGroup(in)
 	if err != nil {
 		return egressFailure(ActionEgressPut, err)
 	}
 	created := false
-	policy, err := r.mutateEgress(ctx, func(p egress.Policy) (egress.Policy, error) {
+	policy, err := a.policy.Mutate(ctx, func(p egress.Policy) (egress.Policy, error) {
 		i := slices.IndexFunc(p.Groups, func(g egress.Group) bool { return g.Name == group.Name })
 		if i < 0 {
 			created = true
@@ -167,20 +105,20 @@ func (r *Runtime) actionEgressPut(ctx context.Context, body []byte) response {
 	if created {
 		status = http.StatusCreated
 	}
-	return response{status, viewEgress(policy)}
+	return kandev.Response{Status: status, Body: viewEgress(policy)}
 }
 
-// actionEgressRemove deletes a custom group and drops it from the defaults.
-// Profiles that still name it fail validation until they are edited.
-func (r *Runtime) actionEgressRemove(ctx context.Context, body []byte) response {
+// remove deletes a custom group and drops it from the defaults. Profiles
+// that still name it fail validation until they are edited.
+func (a *egressActions) remove(ctx context.Context, body []byte) kandev.Response {
 	var in struct {
 		Name string `json:"name"`
 	}
-	if err := decode(body, &in); err != nil || in.Name == "" {
-		return fail(http.StatusUnprocessableEntity, `expected {"name": "..."}`)
+	if err := kandev.Decode(body, &in); err != nil || in.Name == "" {
+		return kandev.Fail(http.StatusUnprocessableEntity, `expected {"name": "..."}`)
 	}
 	missing := false
-	policy, err := r.mutateEgress(ctx, func(p egress.Policy) (egress.Policy, error) {
+	policy, err := a.policy.Mutate(ctx, func(p egress.Policy) (egress.Policy, error) {
 		if g, found := p.Lookup(in.Name); found && g.Builtin {
 			return p, fmt.Errorf("%w: %q is a built-in group", egress.ErrPolicy, in.Name)
 		}
@@ -194,18 +132,18 @@ func (r *Runtime) actionEgressRemove(ctx context.Context, body []byte) response 
 		return egressFailure(ActionEgressRemove, err)
 	}
 	if missing {
-		return fail(http.StatusNotFound, "no such egress group")
+		return kandev.Fail(http.StatusNotFound, "no such egress group")
 	}
-	return ok(viewEgress(policy))
+	return kandev.OK(viewEgress(policy))
 }
 
-// actionEgressDefaults sets the groups every sandbox gets, built-in or custom.
-func (r *Runtime) actionEgressDefaults(ctx context.Context, body []byte) response {
+// defaults sets the groups every sandbox gets, built-in or custom.
+func (a *egressActions) defaults(ctx context.Context, body []byte) kandev.Response {
 	var in struct {
 		Groups []string `json:"groups"`
 	}
-	if err := decode(body, &in); err != nil || in.Groups == nil {
-		return fail(http.StatusUnprocessableEntity, `expected {"groups": ["openrouter", "lan-llm"]}`)
+	if err := kandev.Decode(body, &in); err != nil || in.Groups == nil {
+		return kandev.Fail(http.StatusUnprocessableEntity, `expected {"groups": ["openrouter", "lan-llm"]}`)
 	}
 	var names []string
 	for _, n := range in.Groups {
@@ -213,12 +151,12 @@ func (r *Runtime) actionEgressDefaults(ctx context.Context, body []byte) respons
 			names = append(names, n)
 		}
 	}
-	policy, err := r.mutateEgress(ctx, func(p egress.Policy) (egress.Policy, error) {
+	policy, err := a.policy.Mutate(ctx, func(p egress.Policy) (egress.Policy, error) {
 		p.Defaults = names
 		return p, nil
 	})
 	if err != nil {
 		return egressFailure(ActionEgressDefaults, err)
 	}
-	return ok(viewEgress(policy))
+	return kandev.OK(viewEgress(policy))
 }

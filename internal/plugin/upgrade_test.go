@@ -29,9 +29,9 @@ func runUpgrade(t *testing.T, r *Runtime) map[string]any {
 }
 
 func withUpgradeTarget(t *testing.T, version string) {
-	old := upgradeTarget
-	upgradeTarget = version
-	t.Cleanup(func() { upgradeTarget = old })
+	old := hostsetup.UpgradeTarget
+	hostsetup.UpgradeTarget = version
+	t.Cleanup(func() { hostsetup.UpgradeTarget = old })
 }
 
 func TestUpgradeUpdatesThroughThePluginsKey(t *testing.T) {
@@ -39,10 +39,10 @@ func TestUpgradeUpdatesThroughThePluginsKey(t *testing.T) {
 	r, server := upgradeHost(t, "0.6.0", sshtest.Reply{Stdout: `{"msbctl_version": "0.7.0", "updated": true}`})
 	job := runUpgrade(t, r)
 	steps := jobSteps(job)
-	assert.Equal(t, jobDone, job["state"], steps)
-	assert.Equal(t, hostsetup.StateChanged, steps[stepUpgrade]["state"])
-	assert.Equal(t, "Updated msbctl from 0.6.0 to 0.7.0.", steps[stepUpgrade]["detail"])
-	assert.Equal(t, hostsetup.StateOK, steps[stepProxy]["state"], "a tailscale host has no proxy to restart")
+	assert.Equal(t, hostsetup.JobDone, job["state"], steps)
+	assert.Equal(t, hostsetup.StateChanged, steps[hostsetup.StepUpgrade]["state"])
+	assert.Equal(t, "Updated msbctl from 0.6.0 to 0.7.0.", steps[hostsetup.StepUpgrade]["detail"])
+	assert.Equal(t, hostsetup.StateOK, steps[hostsetup.StepProxy]["state"], "a tailscale host has no proxy to restart")
 	var commands []string
 	for _, e := range server.Execs() {
 		commands = append(commands, e.Command)
@@ -55,8 +55,8 @@ func TestUpgradeLeavesACurrentHostAlone(t *testing.T) {
 	withUpgradeTarget(t, "0.6.0")
 	r, server := upgradeHost(t, "0.6.1", sshtest.Reply{Status: 126})
 	job := runUpgrade(t, r)
-	assert.Equal(t, jobDone, job["state"])
-	assert.Equal(t, hostsetup.StateOK, jobSteps(job)[stepUpgrade]["state"])
+	assert.Equal(t, hostsetup.JobDone, job["state"])
+	assert.Equal(t, hostsetup.StateOK, jobSteps(job)[hostsetup.StepUpgrade]["state"])
 	for _, e := range server.Execs() {
 		assert.NotContains(t, e.Command, "self-update")
 	}
@@ -66,9 +66,9 @@ func TestUpgradeNeedsAHostThatTakesIt(t *testing.T) {
 	withUpgradeTarget(t, "0.7.0")
 	r, server := upgradeHost(t, "0.5.1", sshtest.Reply{Status: 126})
 	job := runUpgrade(t, r)
-	assert.Equal(t, jobFailed, job["state"])
-	assert.Equal(t, hostsetup.StateManual, jobSteps(job)[stepUpgradeCheck]["state"])
-	assert.Contains(t, jobSteps(job)[stepUpgradeCheck]["detail"], "hosts.setup")
+	assert.Equal(t, hostsetup.JobFailed, job["state"])
+	assert.Equal(t, hostsetup.StateManual, jobSteps(job)[hostsetup.StepUpgradeCheck]["state"])
+	assert.Contains(t, jobSteps(job)[hostsetup.StepUpgradeCheck]["detail"], "hosts.setup")
 	for _, e := range server.Execs() {
 		assert.NotContains(t, e.Command, "self-update", "0.5.1's forced command would refuse it")
 	}
@@ -82,8 +82,8 @@ func TestUpgradeSaysWhyTheHostRefused(t *testing.T) {
 	} {
 		r, _ := upgradeHost(t, "0.6.0", sshtest.Reply{Stdout: reply, Status: 3})
 		job := runUpgrade(t, r)
-		assert.Equal(t, jobFailed, job["state"])
-		assert.Contains(t, jobSteps(job)[stepUpgrade]["detail"], want)
+		assert.Equal(t, hostsetup.JobFailed, job["state"])
+		assert.Contains(t, jobSteps(job)[hostsetup.StepUpgrade]["detail"], want)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestUpgradeTrustsTheUpdatesOwnProxyRestart(t *testing.T) {
 		"self-update": {Stdout: `{"msbctl_version": "0.7.0", "updated": true, "proxy": {"state": "restarted", "version": "0.7.0"}}`},
 	})
 	job := runUpgrade(t, r)
-	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[stepProxy]["state"])
+	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[hostsetup.StepProxy]["state"])
 	assert.Nil(t, job["manual"])
 	assert.NotContains(t, commandsOf(server), "msbctl kandev restart-proxy")
 }
@@ -155,8 +155,8 @@ func TestUpgradeFinishesWhatAnOlderUpdateLeft(t *testing.T) {
 		"restart-proxy": {Stdout: `{"proxy": {"state": "restarted", "version": "0.6.1"}}`},
 	})
 	job := runUpgrade(t, r)
-	assert.Equal(t, jobDone, job["state"], jobSteps(job))
-	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[stepProxy]["state"])
+	assert.Equal(t, hostsetup.JobDone, job["state"], jobSteps(job))
+	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[hostsetup.StepProxy]["state"])
 	assert.Contains(t, commandsOf(server), "msbctl kandev restart-proxy")
 }
 
@@ -169,7 +169,7 @@ func TestUpgradeRestartsAStaleProxyOnACurrentHost(t *testing.T) {
 	_, test := call(t, r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Contains(t, test["warning"], "older release than msbctl 0.6.1")
 	job := runUpgrade(t, r)
-	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[stepProxy]["state"])
+	assert.Equal(t, hostsetup.StateChanged, jobSteps(job)[hostsetup.StepProxy]["state"])
 	commands := commandsOf(server)
 	assert.Contains(t, commands, "msbctl kandev restart-proxy")
 	assert.NotContains(t, strings.Join(commands, "\n"), "self-update")
@@ -180,7 +180,7 @@ func TestUpgradeLeavesACurrentProxyAlone(t *testing.T) {
 	withUpgradeTarget(t, "0.6.1")
 	r, server := proxyUpgradeHost(t, "0.6.1", "0.6.1", map[string]sshtest.Reply{})
 	job := runUpgrade(t, r)
-	assert.Equal(t, hostsetup.StateOK, jobSteps(job)[stepProxy]["state"])
+	assert.Equal(t, hostsetup.StateOK, jobSteps(job)[hostsetup.StepProxy]["state"])
 	assert.NotContains(t, commandsOf(server), "msbctl kandev restart-proxy")
 }
 
@@ -190,6 +190,6 @@ func TestUpgradeSaysHowToRestartWhenMsbctlCannot(t *testing.T) {
 		"restart-proxy": {Stdout: `{"error": {"code": "unavailable", "message": "systemctl failed"}}`, Status: 3},
 	})
 	job := runUpgrade(t, r)
-	assert.Equal(t, hostsetup.StateFailed, jobSteps(job)[stepProxy]["state"])
+	assert.Equal(t, hostsetup.StateFailed, jobSteps(job)[hostsetup.StepProxy]["state"])
 	assert.Contains(t, job["manual"].([]any)[0], "systemctl --user restart msb-kandev-proxy.service")
 }

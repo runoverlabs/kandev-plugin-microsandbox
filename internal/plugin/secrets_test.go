@@ -20,9 +20,9 @@ func TestSecretsAreNeverShownOrKeptInState(t *testing.T) {
 	require.Len(t, secrets, 1)
 	assert.Equal(t, []any{"openrouter.ai"}, secrets[0].(map[string]any)["hosts"])
 
-	everything, _ := json.Marshal([]any{body, list, host.state})
+	everything, _ := json.Marshal([]any{body, list, host.State()})
 	assert.NotContains(t, string(everything), plantedSecret, "the value is in the secret store only")
-	assert.Equal(t, plantedSecret, host.secrets[secretValuePrefix+"OPENROUTER_API_KEY"])
+	assert.Equal(t, plantedSecret, host.Secret(secretValuePrefix+"OPENROUTER_API_KEY"))
 }
 
 func TestSecretsPutValidates(t *testing.T) {

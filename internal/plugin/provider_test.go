@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kandev-plugin-microsandbox/internal/msbctl"
+	"kandev-plugin-microsandbox/internal/sandbox"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
 
@@ -150,7 +151,7 @@ func TestProvisionLogsNoSecret(t *testing.T) {
 	f.api.failCheck = true // force the failure paths that log
 	f.provision(t, "env-1", "op-1", fullProfile())
 	bad := fullProfile()
-	f.r.ProvisionExecutorEnvironment(t.Context(), &pluginsdk.ProvisionExecutorEnvironmentRequest{
+	_, _ = f.r.ProvisionExecutorEnvironment(t.Context(), &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context: requestContext("env-2", "op-2"), Profile: bad, BootstrapJson: `{"nonce":"` + plantedNonce + `","api_url":"ftp://x"}`,
 	})
 	for _, secret := range []string{plantedNonce, plantedSecret, plantedRegPW} {
@@ -205,23 +206,6 @@ func TestProvisionFailsWithoutCreatingWhenTheArtifactIsCorrupt(t *testing.T) {
 	require.NotNil(t, res.Error)
 	assert.Equal(t, "unavailable", res.Error.Code)
 	assert.Nil(t, f.hosts["sbx-01"].sandbox("env-1").binary, "no binary reached the host")
-}
-
-func TestParseBootstrapPorts(t *testing.T) {
-	for raw, want := range map[string]msbctl.KandevAPI{
-		`{"nonce":"n","api_url":"https://k.example.com/api/v1"}`:    {Host: "k.example.com", Port: 443},
-		`{"nonce":"n","api_url":"http://k.example.com/api/v1"}`:     {Host: "k.example.com", Port: 80},
-		`{"nonce":"n","api_url":"https://100.64.0.2:38429/api/v1"}`: {Host: "100.64.0.2", Port: 38429},
-		`{"nonce":"n","api_url":"https://[fd7a::1]:8443/api/v1"}`:   {Host: "fd7a::1", Port: 8443},
-	} {
-		_, api, err := parseBootstrap(raw)
-		require.NoError(t, err, raw)
-		assert.Equal(t, want, api, raw)
-	}
-	for _, raw := range []string{`{}`, `{"nonce":"n"}`, `{"nonce":"n","api_url":"ftp://x"}`, `not json`} {
-		_, _, err := parseBootstrap(raw)
-		assert.Error(t, err, raw)
-	}
 }
 
 func (f *providerFixture) provisioned(t *testing.T, env string) *pluginsdk.ExecutorResourceDescriptor {
@@ -345,7 +329,7 @@ func TestDestroy(t *testing.T) {
 
 func TestDestroyForARemovedHostConfirms(t *testing.T) {
 	f := newProviderFixture(t, "sbx-01")
-	state, _ := json.Marshal(resourceState{Host: "sbx-gone", SandboxName: "k-env-1", Env: "env-1"})
+	state, _ := json.Marshal(sandbox.State{Host: "sbx-gone", SandboxName: "k-env-1", Env: "env-1"})
 	res, err := f.r.DestroyExecutorEnvironment(t.Context(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: requestContext("env-1", "op-x"), Resource: &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "msb:sbx-gone/k-env-1", StateJson: string(state)},
 	})
@@ -382,15 +366,6 @@ func TestAttach(t *testing.T) {
 	f.hosts["sbx-01"].mu.Unlock()
 	assert.Equal(t, "not_found", attach(res.Resource).Error.Code)
 	assert.Equal(t, "not_found", attach(nil).Error.Code)
-}
-
-func TestForbiddenLeaseHeadersMatchKandev(t *testing.T) {
-	for _, name := range []string{"Authorization", "authorization", "X-Instance-ID", "Host", "Cookie", "Set-Cookie", "Sec-WebSocket-Protocol", "Connection", "Upgrade", "Proxy-Foo", "Transfer-Encoding"} {
-		assert.True(t, forbiddenLeaseHeader(name), name)
-	}
-	for _, name := range []string{"X-Msb-Lease", "X-Custom"} {
-		assert.False(t, forbiddenLeaseHeader(name), name)
-	}
 }
 
 // Kandev must hold the handle before anything else can fail: a refused

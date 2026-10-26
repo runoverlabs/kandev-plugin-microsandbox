@@ -1,75 +1,51 @@
-// Package plugin wires the neutral packages and the msbctl/SSH adapters to
-// the Kandev SDK. It owns the browser actions and the executor provider RPCs.
+// Package plugin is the transport: it turns Kandev's calls into calls on the
+// features and their answers into SDK responses. Runtime routes the RPCs;
+// each surface (hosts, CA, secrets, egress, host jobs, readiness, the
+// executor provider) is a handler holding only the ports it uses, and
+// wire.go, the one file that builds adapters, puts the graph together.
 package plugin
 
 import (
 	"context"
 	"crypto/x509"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net"
-	"os"
-	"sync"
+	"net/http"
 	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
-	"golang.org/x/crypto/ssh"
 
-	"kandev-plugin-microsandbox/internal/hosts"
-	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/pki"
-	"kandev-plugin-microsandbox/internal/sshx"
+	"kandev-plugin-microsandbox/internal/hostsetup"
+	"kandev-plugin-microsandbox/internal/kandev"
 )
 
-// Host state and secret keys. State is plugin-wide ("instance" scope with an
-// empty scope id): sandbox hosts are not owned by any one workspace.
-const (
-	stateScope       = "instance"
-	registryStateKey = "hosts"
-	sshKeySecret     = "ssh-key"
-)
+// actionTimeout bounds one action, which may make one SSH round trip.
+const actionTimeout = 20 * time.Second
 
-// ErrNoHost means the Host broker connection is not up yet.
-var ErrNoHost = errors.New("kandev host is not connected yet")
+// actionFunc serves one action key.
+type actionFunc func(ctx context.Context, body []byte) kandev.Response
 
 // Runtime is the plugin value pluginsdk.Serve runs.
 type Runtime struct {
 	pluginsdk.UnimplementedPlugin
+	// maintainer also holds the registry and connector the tests reach as
+	// r.registry and r.connect; the Runtime keeps no second copy.
+	maintainer
 
-	dialer sshx.Dialer
-
-	// registryMu serializes registry read-modify-write cycles; Host state
-	// has no compare-and-swap.
-	registryMu sync.Mutex
-
-	keyMu     sync.Mutex
-	signer    ssh.Signer
-	publicKey string
-	pool      *sshx.Pool
-
-	// statusMu serializes writes of the host status cache and of the API
-	// URL last seen, which seenAPIURL caches.
-	statusMu   sync.Mutex
-	seenAPIURL string
+	// Knobs a test may change before the first call; the graph reads them
+	// through closures.
+	now func() time.Time
 	// getenv reads the plugin process's environment, which is Kandev's.
 	getenv func(string) string
-
-	caMu sync.Mutex
-	ca   *pki.Root
 	// trustPool is the root pool trust checks use; nil means the system
 	// roots, which is what Kandev verifies leases against.
 	trustPool *x509.CertPool
-	now       func() time.Time
 
-	jobs jobs
+	keys   interface{ Close() }
+	jobs   *hostsetup.Jobs
+	status statusStore
+	ca     rootStore
 
-	maintMu     sync.Mutex
-	maintFirst  time.Duration
-	maintEvery  time.Duration // zero disables the maintainer
-	maintCancel context.CancelFunc
-	maintWG     sync.WaitGroup
-	closed      bool
+	actions  map[string]actionFunc
+	provider *provider
 }
 
 var (
@@ -78,158 +54,67 @@ var (
 	_ pluginsdk.ExecutorProviderPlugin = (*Runtime)(nil)
 )
 
-// NewRuntime returns a Runtime dialing hosts over the network.
-func NewRuntime() *Runtime {
-	return &Runtime{dialer: &net.Dialer{}, now: time.Now, getenv: os.Getenv, maintFirst: maintainFirst, maintEvery: maintainEvery}
+// SetHost stores the Host and starts the maintainer. Kandev calls it once,
+// from a background goroutine, after the broker connection is up.
+func (r *Runtime) SetHost(h pluginsdk.Host) {
+	r.UnimplementedPlugin.SetHost(h)
+	r.startMaintainer()
 }
 
-func (r *Runtime) host() (pluginsdk.Host, error) {
-	h := r.Host()
-	if h == nil {
-		return nil, ErrNoHost
-	}
-	return h, nil
-}
-
-// store returns the registry store over Host state.
-func (r *Runtime) store() (hosts.Store, error) {
-	h, err := r.host()
-	if err != nil {
-		return nil, err
-	}
-	return stateStore{host: h}, nil
-}
-
-// loadRegistry reads the registry without taking registryMu: a read never
-// needs to wait for a mutation in progress.
-func (r *Runtime) loadRegistry(ctx context.Context) (hosts.Registry, error) {
-	store, err := r.store()
-	if err != nil {
-		return hosts.Registry{}, err
-	}
-	return store.Load(ctx)
-}
-
-// mutateRegistry applies change under registryMu and saves the result.
-func (r *Runtime) mutateRegistry(ctx context.Context, change func(hosts.Registry) (hosts.Registry, error)) (hosts.Registry, error) {
-	store, err := r.store()
-	if err != nil {
-		return hosts.Registry{}, err
-	}
-	r.registryMu.Lock()
-	defer r.registryMu.Unlock()
-	current, err := store.Load(ctx)
-	if err != nil {
-		return hosts.Registry{}, err
-	}
-	next, err := change(current)
-	if err != nil {
-		return hosts.Registry{}, err
-	}
-	if err := store.Save(ctx, next); err != nil {
-		return hosts.Registry{}, err
-	}
-	return next, nil
-}
-
-// key returns the plugin's SSH signer and public key line, generating and
-// storing the key on first use. One key serves every host; the operator
-// authorizes its public half on each with `msbctl host authorize --kandev`.
-func (r *Runtime) key(ctx context.Context) (ssh.Signer, string, error) {
-	r.keyMu.Lock()
-	defer r.keyMu.Unlock()
-	if r.signer != nil {
-		return r.signer, r.publicKey, nil
-	}
-	h, err := r.host()
-	if err != nil {
-		return nil, "", err
-	}
-	private, found, err := h.GetSecret(ctx, sshKeySecret)
-	if err != nil {
-		return nil, "", fmt.Errorf("read ssh key: %w", err)
-	}
-	if !found || private == "" {
-		generated, _, genErr := sshx.GenerateKey()
-		if genErr != nil {
-			return nil, "", genErr
-		}
-		if err := h.SetSecret(ctx, sshKeySecret, generated); err != nil {
-			return nil, "", fmt.Errorf("store ssh key: %w", err)
-		}
-		private = generated
-	}
-	signer, err := sshx.ParseSigner(private)
-	if err != nil {
-		return nil, "", err
-	}
-	r.signer, r.publicKey = signer, sshx.AuthorizedLine(signer.PublicKey())
-	r.pool = sshx.NewPool(signer, r.dialer)
-	return r.signer, r.publicKey, nil
-}
-
-// client returns the msbctl client over the shared SSH pool.
-func (r *Runtime) client(ctx context.Context) (*msbctl.Client, error) {
-	if _, _, err := r.key(ctx); err != nil {
-		return nil, err
-	}
-	r.keyMu.Lock()
-	pool := r.pool
-	r.keyMu.Unlock()
-	return msbctl.New(pool), nil
-}
-
-// Close stops the maintainer and any host setup, and drops every SSH
+// Close stops the maintainer and any host job, and drops every SSH
 // connection.
 func (r *Runtime) Close() {
 	r.stopMaintainer()
-	r.jobs.stop()
-	r.keyMu.Lock()
-	defer r.keyMu.Unlock()
-	if r.pool != nil {
-		r.pool.Close()
-	}
+	r.jobs.Stop()
+	r.keys.Close()
 }
 
-// stateStore keeps the registry as one Host state document.
-type stateStore struct{ host pluginsdk.Host }
-
-func (s stateStore) Load(ctx context.Context) (hosts.Registry, error) {
-	value, found, err := s.host.GetState(ctx, stateScope, "", registryStateKey)
-	if err != nil {
-		return hosts.Registry{}, fmt.Errorf("read host registry: %w", err)
-	}
+// HandleAction serves the settings pages. Every action is admin-only in the
+// manifest.
+//
+// Kandev masks any Go error from an action as a 503, so every failure the
+// operator can act on is returned as a response with its own status.
+func (r *Runtime) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	handler, found := r.actions[req.ActionKey]
 	if !found {
-		return hosts.Registry{Version: hosts.RegistryVersion}, nil
+		return kandev.Fail(http.StatusNotFound, "unknown action").Encode(), nil
 	}
-	// Host state round-trips through a protobuf Struct, so decode by
-	// re-encoding rather than asserting Go types.
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return hosts.Registry{}, errors.New("host registry is unreadable")
-	}
-	var registry hosts.Registry
-	if err := json.Unmarshal(raw, &registry); err != nil {
-		return hosts.Registry{}, errors.New("host registry is unreadable")
-	}
-	if err := registry.Check(); err != nil {
-		return hosts.Registry{}, err
-	}
-	return registry, nil
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+	return handler(ctx, req.Body).Encode(), nil
 }
 
-func (s stateStore) Save(ctx context.Context, registry hosts.Registry) error {
-	registry.Version = hosts.RegistryVersion
-	raw, err := json.Marshal(registry)
-	if err != nil {
-		return err
-	}
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return err
-	}
-	if err := s.host.SetState(ctx, stateScope, "", registryStateKey, value); err != nil {
-		return fmt.Errorf("write host registry: %w", err)
-	}
-	return nil
+// ValidateExecutorProfile checks a profile against the plugin's own state.
+func (r *Runtime) ValidateExecutorProfile(ctx context.Context, req *pluginsdk.ValidateExecutorProfileRequest) (*pluginsdk.ValidateExecutorProfileResponse, error) {
+	return r.provider.validate(ctx, req), nil
+}
+
+// ProvisionExecutorEnvironment creates a sandbox and starts agentctl in it.
+func (r *Runtime) ProvisionExecutorEnvironment(ctx context.Context, req *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
+	return r.provider.provision(ctx, req), nil
+}
+
+// RecoverExecutorOperation resolves a provision whose reply was lost.
+func (r *Runtime) RecoverExecutorOperation(ctx context.Context, req *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
+	return r.provider.recover(ctx, req), nil
+}
+
+// AttachExecutorEnvironment returns the same sandbox, started if stopped.
+func (r *Runtime) AttachExecutorEnvironment(ctx context.Context, req *pluginsdk.AttachExecutorEnvironmentRequest) (*pluginsdk.AttachExecutorEnvironmentResponse, error) {
+	return r.provider.attach(ctx, req), nil
+}
+
+// InspectExecutorEnvironment reports the sandbox's state.
+func (r *Runtime) InspectExecutorEnvironment(ctx context.Context, req *pluginsdk.InspectExecutorEnvironmentRequest) (*pluginsdk.InspectExecutorEnvironmentResponse, error) {
+	return r.provider.inspect(ctx, req), nil
+}
+
+// ResolveExecutorConnection leases one guest port.
+func (r *Runtime) ResolveExecutorConnection(ctx context.Context, req *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
+	return r.provider.lease(ctx, req), nil
+}
+
+// DestroyExecutorEnvironment removes the sandbox and confirms absence.
+func (r *Runtime) DestroyExecutorEnvironment(ctx context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
+	return r.provider.destroy(ctx, req), nil
 }

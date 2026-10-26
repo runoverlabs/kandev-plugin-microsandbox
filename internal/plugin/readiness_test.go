@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kandev-plugin-microsandbox/internal/readiness"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
 
@@ -26,28 +27,28 @@ func TestSetupStatusOnAFreshInstall(t *testing.T) {
 	r := newRuntime(t, newFakeHost())
 	ready, items := readinessItems(t, r)
 	assert.False(t, ready)
-	assert.Equal(t, readyMissing, items["root"]["state"])
-	assert.Equal(t, readyUnknown, items["api_url"]["state"], "nothing in the environment, no launch yet")
+	assert.Equal(t, readiness.Missing, items["root"]["state"])
+	assert.Equal(t, readiness.Unknown, items["api_url"]["state"], "nothing in the environment, no launch yet")
 	assert.NotEmpty(t, items["api_url"]["fix"])
-	assert.Equal(t, readyMissing, items["hosts"]["state"])
+	assert.Equal(t, readiness.Missing, items["hosts"]["state"])
 }
 
 func TestSetupStatusReadsTheAPIURLFromKandevsEnvironment(t *testing.T) {
 	for raw, want := range map[string]string{
-		"https://kandev.vild.party":   readyOK,
-		"https://kandev.example.com/": readyOK,
-		"http://kandev.example.com":   readyInvalid,
-		"https://localhost:8080":      readyInvalid,
-		"https://192.168.2.6":         readyInvalid,
-		"https://127.0.0.1":           readyInvalid,
-		"https://[fe80::1]":           readyInvalid,
-		"https://u:p@kandev.example":  readyInvalid,
-		"https://kandev.example?x=1":  readyInvalid,
-		"kandev.example.com":          readyInvalid,
+		"https://kandev.vild.party":   readiness.OK,
+		"https://kandev.example.com/": readiness.OK,
+		"http://kandev.example.com":   readiness.Invalid,
+		"https://localhost:8080":      readiness.Invalid,
+		"https://192.168.2.6":         readiness.Invalid,
+		"https://127.0.0.1":           readiness.Invalid,
+		"https://[fe80::1]":           readiness.Invalid,
+		"https://u:p@kandev.example":  readiness.Invalid,
+		"https://kandev.example?x=1":  readiness.Invalid,
+		"kandev.example.com":          readiness.Invalid,
 	} {
 		r := newRuntime(t, newFakeHost())
 		r.getenv = func(name string) string {
-			if name == apiURLEnv {
+			if name == readiness.APIURLEnv {
 				return raw
 			}
 			return ""
@@ -65,7 +66,7 @@ func TestSetupStatusFallsBackToTheLastLaunch(t *testing.T) {
 	f.r.now = func() time.Time { return time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC) }
 	require.Nil(t, f.provision(t, "env-1", "op-1", fullProfile()).Error)
 	_, items := readinessItems(t, f.r)
-	assert.Equal(t, readyOK, items["api_url"]["state"])
+	assert.Equal(t, readiness.OK, items["api_url"]["state"])
 	assert.Contains(t, items["api_url"]["detail"], "https://kandev.tailnet.ts.net/api/v1")
 	assert.Contains(t, items["api_url"]["detail"], "2026-10-19T12:00:00Z")
 }
@@ -75,18 +76,18 @@ func TestSetupStatusReadyWhenEverythingIs(t *testing.T) {
 	f.createRoot(t)
 	f.r.getenv = func(string) string { return "https://kandev.example.com" }
 	_, items := readinessItems(t, f.r)
-	assert.Equal(t, readyUntrusted, items["root"]["state"], "the system roots do not hold it")
+	assert.Equal(t, readiness.Untrusted, items["root"]["state"], "the system roots do not hold it")
 
 	f.trustRoot(t)
 	p := newProxyHost()
 	f.addProxyHost(t, "sbx-01", p)
 	_, items = readinessItems(t, f.r)
-	assert.Equal(t, readyUnchecked, items["hosts"]["state"])
+	assert.Equal(t, readiness.Unchecked, items["hosts"]["state"])
 
 	f.r.maintainHosts(t.Context())
 	ready, items := readinessItems(t, f.r)
-	assert.Equal(t, readyOK, items["root"]["state"])
-	assert.Equal(t, readyOK, items["hosts"]["state"], items["hosts"])
+	assert.Equal(t, readiness.OK, items["root"]["state"])
+	assert.Equal(t, readiness.OK, items["hosts"]["state"], items["hosts"])
 	assert.True(t, ready, items)
 }
 
@@ -96,6 +97,6 @@ func TestSetupStatusNamesFailingHosts(t *testing.T) {
 	require.Equal(t, 201, first(call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey))))
 	r.maintainHosts(t.Context())
 	_, items := readinessItems(t, r)
-	assert.Equal(t, readyFailing, items["hosts"]["state"])
+	assert.Equal(t, readiness.Failing, items["hosts"]["state"])
 	assert.Contains(t, items["hosts"]["detail"], "sbx-01: unavailable")
 }

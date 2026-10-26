@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kandev-plugin-microsandbox/internal/msbctl"
-	"kandev-plugin-microsandbox/internal/sshx"
+	"kandev-plugin-microsandbox/internal/remote"
 )
 
 const pluginKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPluginKeyForTests kandev-plugin"
@@ -50,12 +50,12 @@ func ubuntu() *machine {
 
 func (m *machine) has(c string) bool { return !m.missing[c] }
 
-func (m *machine) Exec(_ context.Context, command string, stdin []byte) (sshx.Output, error) {
+func (m *machine) Exec(_ context.Context, command string, stdin []byte) (remote.Output, error) {
 	script := string(stdin)
 	m.execs = append(m.execs, exec{command, script})
-	ok := func(stdout string) (sshx.Output, error) { return sshx.Output{Stdout: []byte(stdout)}, nil }
-	exit := func(code int, stderr string) (sshx.Output, error) {
-		return sshx.Output{Stderr: []byte(stderr), Exit: code}, nil
+	ok := func(stdout string) (remote.Output, error) { return remote.Output{Stdout: []byte(stdout)}, nil }
+	exit := func(code int, stderr string) (remote.Output, error) {
+		return remote.Output{Stderr: []byte(stderr), Exit: code}, nil
 	}
 	switch {
 	case script == probeScript:
@@ -441,4 +441,19 @@ func TestBootstrapStopsWhenTheKeyCannotBeAuthorized(t *testing.T) {
 	assert.Equal(t, StateFailed, states(res)[StepAuthorize])
 	assert.Equal(t, "msbctl: not on PATH", res.Steps[8].Output)
 	assert.Equal(t, StateSkipped, states(res)[StepVerify])
+}
+
+// The planned host and the one registered after the probe write an address
+// the same way, so a setup never registers a destination it did not plan.
+func TestBracketHost(t *testing.T) {
+	for in, want := range map[[2]string]string{
+		{"fd00::1", "0"}:       "[fd00::1]",
+		{"fd00::1", "2222"}:    "[fd00::1]:2222",
+		{"fe80::1%eth0", "22"}: "[fe80::1%eth0]",
+		{"sbx-01.lan", "2222"}: "sbx-01.lan:2222",
+		{"192.168.1.10", "0"}:  "192.168.1.10",
+	} {
+		port, _ := strconv.Atoi(in[1])
+		assert.Equal(t, want, bracketHost(in[0], port), in)
+	}
 }

@@ -3,109 +3,33 @@ package plugin
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"regexp"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
+	"kandev-plugin-microsandbox/internal/kandev/kandevtest"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
+	"kandev-plugin-microsandbox/internal/store"
 )
 
-// fakeHost keeps state and secrets in memory. State values go through JSON,
-// as they do over the wire, so numbers come back as float64.
-type fakeHost struct {
-	pluginsdk.UnimplementedHostData
+// fakeHost is the in-memory Kandev host the tests drive the runtime with.
+type fakeHost = kandevtest.Host
 
-	mu       sync.Mutex
-	state    map[string]map[string]any
-	secrets  map[string]string
-	stateErr error
-}
+func newFakeHost() *fakeHost { return kandevtest.NewHost() }
 
-func newFakeHost() *fakeHost {
-	return &fakeHost{state: map[string]map[string]any{}, secrets: map[string]string{}}
-}
+// Where the plugin keeps its keys and secret values in the secret store.
+const (
+	sshKeySecret      = store.SSHKeySecret
+	caKeySecret       = store.CAKeySecret
+	secretValuePrefix = store.SecretValuePrefix
+)
 
-func stateKey(scope, scopeID, key string) string { return scope + "/" + scopeID + "/" + key }
-
-func (h *fakeHost) GetState(_ context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.stateErr != nil {
-		return nil, false, h.stateErr
-	}
-	v, ok := h.state[stateKey(scope, scopeID, key)]
-	return v, ok, nil
-}
-
-func (h *fakeHost) SetState(_ context.Context, scope, scopeID, key string, value map[string]any) error {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	var copied map[string]any
-	if err := json.Unmarshal(raw, &copied); err != nil {
-		return err
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.stateErr != nil {
-		return h.stateErr
-	}
-	h.state[stateKey(scope, scopeID, key)] = copied
-	return nil
-}
-
-func (h *fakeHost) DeleteState(_ context.Context, scope, scopeID, key string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.state, stateKey(scope, scopeID, key))
-	return nil
-}
-
-func (h *fakeHost) ListState(context.Context, string, string) ([]pluginsdk.StateEntry, error) {
-	return nil, nil
-}
-
-func (h *fakeHost) GetConfig(context.Context) (map[string]any, error) { return map[string]any{}, nil }
-func (h *fakeHost) RevealSecret(context.Context, string) (string, error) {
-	return "", nil
-}
-
-func (h *fakeHost) GetSecret(_ context.Context, key string) (string, bool, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	v, ok := h.secrets[key]
-	return v, ok, nil
-}
-
-// secretKeyPattern is Kandev's rule for plugin secret keys (pluginSecretKeyPattern).
-var secretKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
-
-func (h *fakeHost) SetSecret(_ context.Context, key, value string) error {
-	if !secretKeyPattern.MatchString(key) {
-		return fmt.Errorf("invalid secret key %q", key)
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.secrets[key] = value
-	return nil
-}
-
-func (h *fakeHost) DeleteSecret(_ context.Context, key string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.secrets, key)
-	return nil
-}
-
-func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
+// Where the plugin keeps the hosts' last check results in Host state.
+const statusKey = store.StatusKey
 
 func newRuntime(t *testing.T, host pluginsdk.Host) *Runtime {
 	t.Helper()

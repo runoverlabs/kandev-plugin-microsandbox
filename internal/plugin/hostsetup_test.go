@@ -62,7 +62,7 @@ func waitForJob(t *testing.T, r *Runtime, id string) map[string]any {
 	for {
 		status, job := call(t, r, ActionHostsSetupStatus, map[string]any{"id": id})
 		require.Equal(t, 200, status, job)
-		if job["state"] != jobRunning {
+		if job["state"] != hostsetup.JobRunning {
 			return job
 		}
 		require.True(t, time.Now().Before(deadline), "setup did not finish")
@@ -84,20 +84,20 @@ func TestSetupRegistersAndTestsTheHost(t *testing.T) {
 	server := sshtest.Start(t, pluginKey(t, r), setUpMachine, sshtest.WithPassword(plantedAdminPassword))
 	status, started := call(t, r, ActionHostsSetup, setupBody(server))
 	require.Equal(t, 202, status, started)
-	assert.Equal(t, jobRunning, started["state"])
+	assert.Equal(t, hostsetup.JobRunning, started["state"])
 
 	job := waitForJob(t, r, started["id"].(string))
 	steps := jobSteps(job)
-	assert.Equal(t, jobDone, job["state"], steps)
+	assert.Equal(t, hostsetup.JobDone, job["state"], steps)
 	for _, key := range []string{hostsetup.StepProbe, hostsetup.StepMsb, hostsetup.StepVerify} {
 		assert.Equal(t, hostsetup.StateOK, steps[key]["state"], key)
 	}
-	assert.Equal(t, hostsetup.StateChanged, steps[stepRegister]["state"])
+	assert.Equal(t, hostsetup.StateChanged, steps[hostsetup.StepRegister]["state"])
 	// No root yet, so Test says what is missing; the setup itself is done.
-	assert.Equal(t, hostsetup.StateManual, steps[stepTest]["state"])
+	assert.Equal(t, hostsetup.StateManual, steps[hostsetup.StepTest]["state"])
 	assert.Equal(t, "no_root", job["test"].(map[string]any)["problem"])
 
-	registry, err := r.loadRegistry(t.Context())
+	registry, err := r.registry.Load(t.Context())
 	require.NoError(t, err)
 	h, found := registry.Find("sbx-01")
 	require.True(t, found)
@@ -116,7 +116,7 @@ func TestSetupRegistersAndTestsTheHost(t *testing.T) {
 	// Running it again repairs, rather than refusing the registered name.
 	status, again := call(t, r, ActionHostsSetup, setupBody(server))
 	require.Equal(t, 202, status, again)
-	assert.Equal(t, jobDone, waitForJob(t, r, again["id"].(string))["state"])
+	assert.Equal(t, hostsetup.JobDone, waitForJob(t, r, again["id"].(string))["state"])
 }
 
 func TestSetupNeverKeepsOrShowsTheAdminLogin(t *testing.T) {
@@ -136,10 +136,10 @@ func TestSetupNeverKeepsOrShowsTheAdminLogin(t *testing.T) {
 	body["name"] = "sbx-02"
 	_, failedStart := call(t, r, ActionHostsSetup, body)
 	failed := waitForJob(t, r, failedStart["id"].(string))
-	assert.Equal(t, jobFailed, failed["state"])
+	assert.Equal(t, hostsetup.JobFailed, failed["state"])
 	assert.Equal(t, "The machine refused the admin login.", jobSteps(failed)[hostsetup.StepProbe]["detail"])
 
-	everything, _ := json.Marshal([]any{started, job, failedStart, failed, host.state, host.secrets})
+	everything, _ := json.Marshal([]any{started, job, failedStart, failed, host.State(), host.Secrets()})
 	for _, e := range server.Execs() {
 		everything = append(everything, e.Command...)
 		everything = append(everything, e.Stdin...)

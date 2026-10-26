@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"kandev-plugin-microsandbox/internal/hosts"
+	"kandev-plugin-microsandbox/internal/kandev/kandevtest"
+	"kandev-plugin-microsandbox/internal/profile"
+	"kandev-plugin-microsandbox/internal/sandbox"
 	"kandev-plugin-microsandbox/internal/sshx"
 	"kandev-plugin-microsandbox/internal/sshx/sshtest"
 )
@@ -25,14 +27,14 @@ func TestListGeneratesOneKeyAndKeepsIt(t *testing.T) {
 	assert.True(t, strings.HasPrefix(publicKey, "ssh-ed25519 "))
 	assert.Equal(t, "msbctl host authorize '"+publicKey+"' --kandev", body["authorize"])
 	assert.Equal(t, []any{}, body["hosts"])
-	private := host.secrets[sshKeySecret]
+	private := host.Secret(sshKeySecret)
 	require.NotEmpty(t, private)
 
 	// A restarted plugin process reads the same key back.
 	again := newRuntime(t, host)
 	_, body = call(t, again, ActionHostsList, nil)
 	assert.Equal(t, publicKey, body["public_key"])
-	assert.Equal(t, private, host.secrets[sshKeySecret])
+	assert.Equal(t, private, host.Secret(sshKeySecret))
 	assert.NotContains(t, body, "private", "the private key never leaves the secret store")
 }
 
@@ -58,6 +60,62 @@ func TestAddUpdateDrainRoundTrip(t *testing.T) {
 	list := body["hosts"].([]any)
 	require.Len(t, list, 1)
 	assert.Equal(t, []any{"gpu"}, list[0].(map[string]any)["labels"])
+}
+
+// Without a root there is no certificate to issue, so a write never reaches
+// for the plugin's key, let alone generates one.
+func TestAddWithoutARootLeavesTheKeyAlone(t *testing.T) {
+	host := newFakeHost()
+	r := newRuntime(t, host)
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	require.Equal(t, 201, status, body)
+	assert.NotContains(t, body, "tls")
+	assert.Empty(t, host.Secret(sshKeySecret))
+}
+
+// Nor does a maintainer pass with nothing to maintain.
+func TestMaintainingNoHostsLeavesTheKeyAlone(t *testing.T) {
+	host := newFakeHost()
+	r := newRuntime(t, host)
+	assert.Empty(t, r.maintainHosts(t.Context()))
+	assert.Empty(t, host.Secret(sshKeySecret))
+}
+
+// secretlessHost is a Kandev whose secret store is down.
+type secretlessHost struct{ *kandevtest.Host }
+
+func (secretlessHost) GetSecret(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("secret store down")
+}
+
+func (secretlessHost) SetSecret(context.Context, string, string) error {
+	return errors.New("secret store down")
+}
+
+// A key that cannot be read is not blamed on the registry.
+func TestAnUnreadableKeyIsNamed(t *testing.T) {
+	r := newRuntime(t, secretlessHost{newFakeHost()})
+	status, body := call(t, r, ActionHostsList, nil)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, "the plugin's SSH key could not be read or saved", body["error"])
+}
+
+// statusOutage is a Kandev that cannot read the hosts' last check results.
+type statusOutage struct{ *fakeHost }
+
+func (h statusOutage) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
+	if key == statusKey {
+		return nil, false, errors.New("state store down")
+	}
+	return h.fakeHost.GetState(ctx, scope, scopeID, key)
+}
+
+// Nor are the hosts' last check results.
+func TestUnreadableCheckResultsAreNamed(t *testing.T) {
+	r := newRuntime(t, statusOutage{newFakeHost()})
+	status, body := call(t, r, ActionHostsList, nil)
+	assert.Equal(t, 500, status)
+	assert.Equal(t, "the hosts' last check results could not be read or saved", body["error"])
 }
 
 func TestAddRejectsBadInput(t *testing.T) {
@@ -92,7 +150,7 @@ func TestActionsWithoutHostAreUnavailable(t *testing.T) {
 
 func TestRegistryFailureDoesNotLeakTheCause(t *testing.T) {
 	host := newFakeHost()
-	host.stateErr = errors.New("sqlite: disk I/O error at /home/op/.kandev/data/kandev.db")
+	host.StateErr = errors.New("sqlite: disk I/O error at /home/op/.kandev/data/kandev.db")
 	r := newRuntime(t, host)
 	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
 	assert.Equal(t, 500, status)
@@ -243,10 +301,11 @@ func TestOutdatedHostIsDiagnosedAndNeverPlaced(t *testing.T) {
 	assert.Equal(t, "outdated", body["problem"])
 	assert.Contains(t, body["hint"], "workspace_disk")
 
-	client, err := r.client(t.Context())
+	client, err := r.connect(t.Context())
 	require.NoError(t, err)
-	registry, err := r.loadRegistry(t.Context())
+	registry, err := r.registry.Load(t.Context())
 	require.NoError(t, err)
-	_, err = hosts.Place(t.Context(), registry.Hosts, &placementProber{r: r, client: client}, hosts.Demand{CPUs: 1, MemoryMiB: 512})
-	assert.ErrorIs(t, err, hosts.ErrUnreachable, "an outdated host is not a candidate")
+	_, failure := sandbox.PlaceOrReuse(t.Context(), client, r.provider.healer, registry.Hosts, profile.Spec{CPUs: 1, MemoryMiB: 512}, "op-1")
+	require.NotNil(t, failure)
+	assert.Equal(t, "hostsUnreachable", failure.MessageID, "an outdated host is not a candidate")
 }

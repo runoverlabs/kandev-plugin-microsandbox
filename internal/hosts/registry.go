@@ -176,13 +176,17 @@ func validateBaseURL(raw string) error {
 	if u.Path != "" && u.Path != "/" {
 		return errors.New("must not carry a path; the plugin appends /vm/<env>/p/<port>")
 	}
-	host := u.Hostname()
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
-			return errors.New("Kandev refuses loopback, link-local, multicast and unspecified addresses")
-		}
-	} else if strings.EqualFold(host, "localhost") {
-		return errors.New("Kandev refuses loopback addresses")
+	return addressProblem(u.Hostname())
+}
+
+// addressProblem refuses the host literals Kandev refuses in a lease.
+func addressProblem(host string) error {
+	if strings.EqualFold(host, "localhost") {
+		return errors.New("Kandev refuses loopback addresses") //nolint:staticcheck // ST1005: Kandev is a name, and operators see this text
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified()) {
+		return errors.New("Kandev refuses loopback, link-local, multicast and unspecified addresses") //nolint:staticcheck // ST1005: as above
 	}
 	return nil
 }

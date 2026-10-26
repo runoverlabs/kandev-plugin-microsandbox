@@ -27,10 +27,12 @@ produces. Raising the target above `min_kandev_version` is when a second
 
 ```sh
 make claude-md             # local-only CLAUDE.md pointing at AGENTS.md
-make lint                  # gofmt, go vet, manifest check against Kandev's validator
-make test                  # Go tests
+make lint                  # gofmt, go vet, manifest check, tsc, golangci-lint, ESLint, dependency-cruiser
+make test                  # Go tests (layer rules included)
 make test-race             # the same with the race detector (what CI runs)
 make test-ui               # UI: typecheck, build ui/bundle.js, vitest
+make metrics               # the most complex functions, without failing
+make deadcode              # functions unreachable from server/
 make security              # gitleaks, govulncheck
 make verify-package-host   # host-platform tarball + checksums
 make package               # all five platforms, for a release
@@ -43,23 +45,37 @@ internal package of the Kandev module and cannot be imported from here.
 
 ## Layout
 
+The packages are layered, and an import only points down. The layer table and
+the rules that enforce it are in [architecture.md](architecture.md).
+
 | Package | Owns |
 | --- | --- |
+| `internal/remote/` | Running a command on a host: shlex-compatible quoting, a command's output, the admin login, the error kinds (host key mismatch, not authorized, unusable admin login). Standard library only. |
+| `internal/kandev/` | Reaching Kandev: the late-bound Host, the plugin-wide state document codec, JSON action responses. `kandevtest/` is an in-memory host for tests. |
+| `internal/egress/` | Egress entries, groups and the plugin-wide policy. Pure. |
 | `internal/profile/` | Parsing and validating an executor profile. Pure. |
+| `internal/secrets/` | The secret index and the validation of a put. Pure. |
 | `internal/hosts/` | The host registry model and placement, with `Store` and `Prober` ports. No SSH, no SDK. |
-| `internal/msbctl/` | The `msbctl kandev` protocol: verbs, JSON documents, error envelope, exit statuses ([host-protocol.md](host-protocol.md)). |
-| `internal/sshx/` | SSH transport: the plugin key, host key pinning and scanning, the connection pool, shlex-compatible quoting. |
+| `internal/pki/` | The root CA, host certificates, renewal and trust. Pure crypto. |
+| `internal/msbctl/` | The `msbctl kandev` protocol: verbs, JSON documents, error envelope, exit statuses ([host-protocol.md](host-protocol.md)), run through a `Runner`. |
+| `internal/hostcheck/` | Test's diagnosis of a host and certificate care, over `Host`, `Roots` and `Policies` ports. |
+| `internal/sandbox/` | The executor provider's decisions: resource state, bootstrap, the provision request, placement or reuse, finding an operation, Kandev's states, lease headers. No SDK. |
+| `internal/readiness/` | The `setup.status` items. |
+| `internal/hostsetup/` | Setting a machine up over an admin login (`hosts.setup`): steps, accounts, packages, firewall, one file each; the in-memory job table and the setup and upgrade jobs. |
+| `internal/sshx/` | SSH transport: the keyring (the plugin key, generated on first use), host key pinning and scanning, the connection pool, the admin login. |
 | `internal/sshx/sshtest/` | An in-process SSH server standing in for a sandbox host, for tests. |
-| `internal/plugin/` | SDK wiring: Host state and secrets, the `hosts.*` actions, the executor provider RPCs. |
-| `internal/hostsetup/` | Setting a machine up over an admin login (`hosts.setup`): steps, accounts, packages, firewall. |
+| `internal/store/` | Where the plugin keeps its state in Kandev: the registry, egress policy, secrets, host status, root CA, API URL and SSH key. |
+| `internal/plugin/` | The transport: one handler per surface (hosts, CA, secrets, egress, host jobs, readiness, the executor provider) holding only the ports it uses; `Runtime` routes the RPCs and runs the maintainer, and `wire.go` builds the graph. |
+| `internal/archtest/` | The layer rules as a test. |
 | `server/` | `main`: `pluginsdk.Serve`. |
 | `ui/` | The settings pages. `src/` is TypeScript over the host's React and components; `bundle.js` is built (`npm ci`, then `make test-ui` or `make ui/bundle.js`) and not committed. |
 | `assets/` | `icon.svg`, the manifest's icon: a 16×16 dot grid in the style of the forgejo plugin's and msb-manager's. |
 
 The UI resolves `@kandev/plugin-sdk` from the sibling checkout, like the Go
-module. `npm install` hits an npm resolver bug on that linked package
-(`Cannot read properties of null (reading 'edgesOut')`); `npm ci` from the
-committed lockfile works.
+module. npm 10's `npm install` hits a resolver bug on that linked package
+(`Cannot read properties of null (reading 'edgesOut')`) when it adds or
+changes a dependency; npm 11 does not (`npx npm@11 install ...` where the
+system npm is 10). `npm ci` from the committed lockfile works with either.
 
 Tests never need a real host: the plugin and transport tests run real SSH
 against `sshtest` servers on loopback, answering scripted `msbctl kandev`

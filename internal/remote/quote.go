@@ -1,7 +1,4 @@
-// Package sshx is the SSH transport to sandbox hosts: the plugin's key, host
-// key pinning, one shared connection per host, and the command-line quoting
-// the host's forced command expects. It knows nothing about msbctl verbs.
-package sshx
+package remote
 
 import (
 	"regexp"

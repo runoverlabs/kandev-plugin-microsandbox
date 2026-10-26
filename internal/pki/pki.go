@@ -49,7 +49,21 @@ var (
 	// ErrUntrusted means the host's certificate does not chain to a root
 	// the system trusts: the root is not installed on the Kandev server.
 	ErrUntrusted = errors.New("the host's certificate is not trusted by this machine's system roots")
+	// ErrNoRoot means no root has been created yet.
+	ErrNoRoot = errors.New("no root certificate has been created")
+	// ErrRootUnusable means a root was created but what is stored cannot be
+	// used: its key is gone or unreadable, or does not match. Only replacing
+	// the root fixes it, unlike a failure to read the store.
+	ErrRootUnusable = errors.New("the stored root cannot be used")
 )
+
+// Unusable is an error that is ErrRootUnusable, with its own text.
+func Unusable(text string) error { return unusableError(text) }
+
+type unusableError string
+
+func (e unusableError) Error() string      { return string(e) }
+func (unusableError) Is(target error) bool { return target == ErrRootUnusable }
 
 // Constraints are what the root may certify.
 type Constraints struct {
@@ -198,19 +212,19 @@ func NewRoot(c Constraints, now time.Time) (*Root, string, string, error) {
 func LoadRoot(certPEM, keyPEM string) (*Root, error) {
 	cert, err := parseCert(certPEM)
 	if err != nil {
-		return nil, errors.New("stored root certificate is unreadable")
+		return nil, Unusable("stored root certificate is unreadable")
 	}
 	block, _ := pem.Decode([]byte(keyPEM))
 	if block == nil {
-		return nil, errors.New("stored root key is unreadable")
+		return nil, Unusable("stored root key is unreadable")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, errors.New("stored root key is unreadable")
+		return nil, Unusable("stored root key is unreadable")
 	}
 	key, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok || !key.PublicKey.Equal(cert.PublicKey) {
-		return nil, errors.New("stored root key does not match its certificate")
+		return nil, Unusable("stored root key does not match its certificate")
 	}
 	return &Root{Cert: cert, key: key}, nil
 }
