@@ -111,10 +111,11 @@ func OutsideRoot(root *pki.Root, h hosts.Host) string {
 // the host is saved either way, and the maintainer retries. tried is false
 // when there is no root to issue from yet. It connects only once there is a
 // root, so a write before the CA exists never loads, or generates, the
-// plugin's key.
+// plugin's key. A root that cannot be read is Heal's to report, after the
+// host says it needs a certificate at all.
 func (c *Checker) HealNow(ctx context.Context, connect func(context.Context) (Host, error), h hosts.Host) (outcome TLSOutcome, tried bool) {
-	if root, missing := c.loadRoot(ctx, h); root == nil {
-		return missing, missing.State != TLSNoRoot
+	if _, err := c.Roots.Root(ctx); errors.Is(err, pki.ErrNoRoot) {
+		return TLSOutcome{State: TLSNoRoot}, false
 	}
 	api, err := connect(ctx)
 	if err != nil {

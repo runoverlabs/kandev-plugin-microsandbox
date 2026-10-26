@@ -5,7 +5,9 @@
 - A root certificate that exists but cannot be used, such as one whose key
   is gone from the secret store, is reported instead of being read as "no
   root yet": Test reports `root_unusable`, `hosts.add` and `hosts.update`
-  answer `tls` `root_unusable`, and `setup.status` shows the `root` item as
+  answer `tls` `root_unusable` for a host that terminates TLS with the
+  plugin's certificate (`not_proxy` for one that does not), `ca.get` answers
+  `usable: false` with the reason, and `setup.status` shows the `root` item as
   `failing` rather than failing as a whole. `ca.create` with `replace` now
   replaces it; without `replace` it answers 409. A failure to read the
   store stays an error to retry, and never replaces the root.

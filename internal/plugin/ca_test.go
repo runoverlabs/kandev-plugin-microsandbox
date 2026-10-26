@@ -384,9 +384,16 @@ func TestAnUnusableRootIsReportedAndReplaceable(t *testing.T) {
 	_, body := call(t, f.r, ActionHostsTest, map[string]any{"name": "sbx-01"})
 	assert.Equal(t, "root_unusable", body["problem"])
 
-	status, body := call(t, f.r, ActionHostsAdd, hostBody("sbx-02", "msb@sbx-02", unusedHostKey))
-	require.Equal(t, 201, status, body)
+	status, body := call(t, f.r, ActionCAGet, nil)
+	require.Equal(t, 200, status, "an unusable root is an answer, not a failure to retry")
+	assert.Equal(t, true, body["exists"])
+	assert.Equal(t, false, body["usable"])
+	assert.Contains(t, body["problem"], "key is missing")
+
+	_, body = f.addProxyHost(t, "sbx-02", newProxyHost())
 	assert.Equal(t, map[string]any{"state": "root_unusable"}, body["tls"])
+	_, body = f.addProxyHost(t, "sbx-03", &proxyHost{mode: "tailscale"})
+	assert.Equal(t, map[string]any{"state": "not_proxy"}, body["tls"], "a host that needs no certificate is not told to replace the root")
 
 	status, body = call(t, f.r, ActionSetupStatus, nil)
 	require.Equal(t, 200, status, body)
@@ -426,7 +433,8 @@ func TestAStoreOutageIsNotAnUnusableRoot(t *testing.T) {
 	assert.Equal(t, 500, first(call(t, r, ActionCACreate, map[string]any{"dns_suffixes": []string{"example.com"}, "replace": true})))
 	assert.Equal(t, key, host.Secret(caKeySecret), "the root is not replaced")
 
-	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", "msb@sbx-01", unusedHostKey))
+	server := sshtest.Start(t, pluginKey(t, r), newProxyHost().handle)
+	status, body := call(t, r, ActionHostsAdd, hostBody("sbx-01", server.Dest("msb"), server.HostKey))
 	require.Equal(t, 201, status, body)
 	assert.Equal(t, map[string]any{"state": "failed", "reason": "unavailable"}, body["tls"])
 }

@@ -43,6 +43,11 @@ func (a *caActions) get(ctx context.Context, body []byte) kandev.Response {
 	if errors.Is(err, pki.ErrNoRoot) {
 		return kandev.OK(map[string]any{"exists": false, "install": readiness.RootInstallSteps})
 	}
+	// Only a replace fixes an unusable root, so it is an answer, not a
+	// failure to retry.
+	if errors.Is(err, pki.ErrRootUnusable) {
+		return kandev.OK(map[string]any{"exists": true, "usable": false, "problem": err.Error(), "install": readiness.RootInstallSteps})
+	}
 	if err != nil {
 		return kandev.Internal(ActionCAGet, caWhat, err)
 	}
@@ -52,6 +57,7 @@ func (a *caActions) get(ctx context.Context, body []byte) kandev.Response {
 func (a *caActions) view(root *pki.Root) map[string]any {
 	return map[string]any{
 		"exists":      true,
+		"usable":      true,
 		"cert_pem":    root.PEM(),
 		"sha256":      root.Fingerprint(),
 		"constraints": root.Constraints(),
